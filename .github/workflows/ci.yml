@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Proxy Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proxy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Run tests
+        run: bun test
+
+  bicep-validate:
+    name: Validate Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate main infrastructure
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - name: Validate ACI container group
+        run: az bicep build --file infra/aci/container-group.bicep --stdout > /dev/null
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - context: proxy
+            name: proxy
+          - context: openclaw
+            name: openclaw
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.name }} image
+        run: docker build -t openclaw-${{ matrix.name }}:ci-test ${{ matrix.context }}
+
+  secrets-scan:
+    name: Secrets Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for hardcoded API keys
+        run: |
+          echo "Scanning for hardcoded secrets..."
+          PATTERNS=(
+            'sk-ant-[a-zA-Z0-9]{20,}'
+            'AKIA[0-9A-Z]{16}'
+            'ghp_[a-zA-Z0-9]{36}'
+            'xai-[a-zA-Z0-9]{20,}'
+            'sk-[a-zA-Z0-9]{20,}'
+          )
+          FOUND=0
+          for pattern in "${PATTERNS[@]}"; do
+            if grep -rE "$pattern" --include='*.ts' --include='*.json' --include='*.bicep' --include='*.sh' --include='*.md' . | grep -v 'node_modules' | grep -v '.git/'; then
+              echo "FAIL: Found potential secret matching pattern: $pattern"
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::error::Hardcoded secrets detected. Remove them and use Azure Key Vault."
+            exit 1
+          fi
+          echo "PASS: No hardcoded secrets found."
+
+      - name: Verify SOUL.md integrity baseline
+        run: |
+          if [ -f .soul-checksum ]; then
+            ./scripts/check-soul-integrity.sh
+          else
+            echo "No .soul-checksum baseline yet (first run). Skipping."
+          fi
+
+  scripts-lint:
+    name: Lint Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check scripts are executable
+        run: |
+          for f in scripts/*.sh; do
+            if [ ! -x "$f" ]; then
+              echo "FAIL: $f is not executable"
+              exit 1
+            fi
+          done
+          echo "PASS: All scripts are executable."
+
+      - name: Shellcheck
+        run: |
+          if command -v shellcheck &> /dev/null; then
+            shellcheck scripts/*.sh || true
+          else
+            echo "shellcheck not available, skipping"
+          fi

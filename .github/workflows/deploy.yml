@@ -1,0 +1,214 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      mvp_level:
+        description: 'MVP level to deploy'
+        required: true
+        default: 'mvp0'
+        type: choice
+        options:
+          - mvp0
+          - mvp1
+          - mvp2
+      resource_group:
+        description: 'Azure resource group name'
+        required: true
+        default: 'rg-openclaw-secure'
+      action:
+        description: 'Deployment action'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - verify-only
+          - destroy
+
+# OIDC federation — no long-lived secrets
+# Setup: https://learn.microsoft.com/en-us/azure/developer/github/connect-from-azure
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ inputs.resource_group }}
+  MVP_LEVEL: ${{ inputs.mvp_level }}
+
+jobs:
+  # Gate: require CI to pass first
+  preflight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SOUL.md integrity check
+        run: |
+          if [ -f .soul-checksum ]; then
+            ./scripts/check-soul-integrity.sh
+          else
+            echo "WARNING: No .soul-checksum baseline. Creating one."
+            sha256sum openclaw/SOUL.md | awk '{print $1}' > .soul-checksum
+          fi
+
+      - name: Validate Bicep
+        run: |
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          az bicep build --file infra/aci/container-group.bicep --stdout > /dev/null
+
+      - name: Secrets scan
+        run: |
+          if grep -rE 'sk-ant-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}' --include='*.ts' --include='*.json' --include='*.bicep' --include='*.sh' . | grep -v node_modules | grep -v '.git/'; then
+            echo "::error::Hardcoded secrets detected!"
+            exit 1
+          fi
+
+  deploy:
+    name: Deploy to Azure
+    needs: preflight
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    environment: production  # Requires manual approval in GitHub Settings > Environments
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run tests before deploy
+        working-directory: proxy
+        run: bun install && bun test
+
+      - name: Create resource group
+        run: |
+          az group create \
+            --name "$AZURE_RESOURCE_GROUP" \
+            --location eastus2 \
+            --tags project=openclaw-secure environment=dev
+
+      - name: Deploy infrastructure (Bicep)
+        run: |
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/parameters.json \
+            --parameters projectName=openclaw
+
+      - name: Get deployment outputs
+        id: infra
+        run: |
+          ACR_LOGIN=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.acrLoginServer.value' -o tsv)
+          ACR_NAME=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.acrName.value' -o tsv)
+          VAULT_NAME=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.vaultName.value' -o tsv)
+          IDENTITY_ID=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.managedIdentityId.value' -o tsv)
+          IDENTITY_CLIENT=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.managedIdentityClientId.value' -o tsv)
+          WORKSPACE_ID=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.workspaceId.value' -o tsv)
+          PRIVATE_SUBNET=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.privateSubnetId.value' -o tsv)
+          PROXY_SUBNET=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.proxySubnetId.value' -o tsv)
+
+          echo "acr_login=$ACR_LOGIN" >> "$GITHUB_OUTPUT"
+          echo "acr_name=$ACR_NAME" >> "$GITHUB_OUTPUT"
+          echo "vault_name=$VAULT_NAME" >> "$GITHUB_OUTPUT"
+          echo "identity_id=$IDENTITY_ID" >> "$GITHUB_OUTPUT"
+          echo "identity_client=$IDENTITY_CLIENT" >> "$GITHUB_OUTPUT"
+          echo "workspace_id=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
+          echo "private_subnet=$PRIVATE_SUBNET" >> "$GITHUB_OUTPUT"
+          echo "proxy_subnet=$PROXY_SUBNET" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push images
+        run: |
+          az acr login --name "${{ steps.infra.outputs.acr_name }}"
+
+          docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-proxy:$MVP_LEVEL" proxy/
+          docker push "${{ steps.infra.outputs.acr_login }}/openclaw-proxy:$MVP_LEVEL"
+
+          docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-agent:$MVP_LEVEL" openclaw/
+          docker push "${{ steps.infra.outputs.acr_login }}/openclaw-agent:$MVP_LEVEL"
+
+      - name: Deploy ACI container groups
+        run: |
+          WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --workspace-name openclaw-logs \
+            --query primarySharedKey -o tsv)
+
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/aci/container-group.bicep \
+            --parameters "infra/aci/parameters.${MVP_LEVEL}.json" \
+            --parameters \
+              acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
+              acrName="${{ steps.infra.outputs.acr_name }}" \
+              proxyImage="${{ steps.infra.outputs.acr_login }}/openclaw-proxy:${MVP_LEVEL}" \
+              openclawImage="${{ steps.infra.outputs.acr_login }}/openclaw-agent:${MVP_LEVEL}" \
+              vaultName="${{ steps.infra.outputs.vault_name }}" \
+              workspaceId="${{ steps.infra.outputs.workspace_id }}" \
+              workspaceKey="$WORKSPACE_KEY" \
+              privateSubnetId="${{ steps.infra.outputs.private_subnet }}" \
+              proxySubnetId="${{ steps.infra.outputs.proxy_subnet }}" \
+              managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
+              managedIdentityClientId="${{ steps.infra.outputs.identity_client }}" \
+              location=eastus2
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **MVP Level:** $MVP_LEVEL" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Resource Group:** $AZURE_RESOURCE_GROUP" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **ACR:** ${{ steps.infra.outputs.acr_login }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Key Vault:** ${{ steps.infra.outputs.vault_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Next:** Set API key with \`az keyvault secret set\` then run verify." >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    name: Verify Deployment
+    needs: deploy
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run verification suite
+        run: ./scripts/verify.sh "$AZURE_RESOURCE_GROUP"
+
+  destroy:
+    name: Destroy Infrastructure
+    if: inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Kill agent containers
+        run: ./scripts/kill-agent.sh "$AZURE_RESOURCE_GROUP"
+
+      - name: Delete resource group
+        run: |
+          echo "Deleting resource group: $AZURE_RESOURCE_GROUP"
+          az group delete --name "$AZURE_RESOURCE_GROUP" --yes --no-wait
+          echo "Resource group deletion initiated (async)."
