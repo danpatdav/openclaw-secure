@@ -1,8 +1,8 @@
 @description('Azure region for the Key Vault')
 param location string
 
-@description('Project name used for resource naming')
-param projectName string
+@description('Key Vault name (must be globally unique, 3-24 chars, alphanumeric and hyphens)')
+param name string
 
 @description('Principal ID of the managed identity that needs secret read access')
 param principalId string
@@ -11,7 +11,7 @@ param principalId string
 param tags object = {}
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
-  name: '${projectName}-kv'
+  name: name
   location: location
   tags: tags
   properties: {

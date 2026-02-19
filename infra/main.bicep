@@ -40,8 +40,8 @@ module containerRegistry 'modules/container-registry.bicep' = {
 module keyVault 'modules/key-vault.bicep' = {
   name: 'keyVault'
   params: {
+    name: '${projectName}-kv-${uniqueString(resourceGroup().id)}'
     location: location
-    projectName: projectName
     principalId: managedIdentity.properties.principalId
     tags: tags
   }
