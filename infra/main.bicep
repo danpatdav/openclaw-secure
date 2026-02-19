@@ -31,7 +31,7 @@ module networking 'modules/networking.bicep' = {
 module containerRegistry 'modules/container-registry.bicep' = {
   name: 'containerRegistry'
   params: {
-    name: '${replace(projectName, '-', '')}acr'
+    name: '${replace(projectName, '-', '')}acr${uniqueString(resourceGroup().id)}'
     location: location
     tags: tags
   }
