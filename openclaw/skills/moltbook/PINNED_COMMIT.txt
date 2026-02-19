@@ -1,0 +1,6 @@
+# Moltbook Skill Pin Record
+# Source: https://github.com/openclaw/skills-moltbook
+# Pinned: Not yet pinned — awaiting initial skill selection
+# SHA: TBD
+# Date: TBD
+# Reviewed by: Daniel

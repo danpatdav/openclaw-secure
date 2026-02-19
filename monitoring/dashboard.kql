@@ -1,0 +1,115 @@
+// OpenClaw Secure — Azure Monitor Dashboard Queries
+// Import these into an Azure Monitor Workbook
+
+// ============================================
+// 1. Real-time Action Stream (last 1 hour)
+// ============================================
+ContainerLog
+| where ContainerName_s == "bun-proxy"
+| where TimeGenerated > ago(1h)
+| extend LogEntry = parse_json(LogEntry_s)
+| project
+    TimeGenerated,
+    Method = tostring(LogEntry.method),
+    Hostname = tostring(LogEntry.hostname),
+    Path = tostring(LogEntry.path),
+    Allowed = tobool(LogEntry.allowed),
+    Sanitized = tobool(LogEntry.sanitized),
+    Status = toint(LogEntry.response_status),
+    Duration = todouble(LogEntry.duration_ms)
+| order by TimeGenerated desc
+
+// ============================================
+// 2. Blocked Requests (security events)
+// ============================================
+ContainerLog
+| where ContainerName_s == "bun-proxy"
+| where TimeGenerated > ago(24h)
+| extend LogEntry = parse_json(LogEntry_s)
+| where tobool(LogEntry.allowed) == false
+| project
+    TimeGenerated,
+    Method = tostring(LogEntry.method),
+    Hostname = tostring(LogEntry.hostname),
+    BlockedReason = tostring(LogEntry.blocked_reason)
+| summarize Count = count() by Hostname, Method, BlockedReason
+| order by Count desc
+
+// ============================================
+// 3. Injection Detection Events
+// ============================================
+ContainerLog
+| where ContainerName_s == "bun-proxy"
+| where TimeGenerated > ago(24h)
+| extend LogEntry = parse_json(LogEntry_s)
+| where tobool(LogEntry.sanitized) == true
+| project
+    TimeGenerated,
+    Hostname = tostring(LogEntry.hostname),
+    Path = tostring(LogEntry.path),
+    Patterns = tostring(LogEntry.injection_patterns)
+| order by TimeGenerated desc
+
+// ============================================
+// 4. Rate Limit Utilization (MVP2)
+// ============================================
+ContainerLog
+| where ContainerName_s == "bun-proxy"
+| where TimeGenerated > ago(1h)
+| extend LogEntry = parse_json(LogEntry_s)
+| where tostring(LogEntry.hostname) == "www.moltbook.com"
+| where tostring(LogEntry.method) == "POST"
+| summarize
+    PostsThisHour = countif(tobool(LogEntry.allowed)),
+    BlockedByRateLimit = countif(tostring(LogEntry.blocked_reason) contains "rate_limit")
+| extend RateLimitUtilization = round(PostsThisHour * 100.0 / 3, 1)
+
+// ============================================
+// 5. Hourly Traffic Summary
+// ============================================
+ContainerLog
+| where ContainerName_s == "bun-proxy"
+| where TimeGenerated > ago(24h)
+| extend LogEntry = parse_json(LogEntry_s)
+| summarize
+    TotalRequests = count(),
+    AllowedRequests = countif(tobool(LogEntry.allowed)),
+    BlockedRequests = countif(tobool(LogEntry.allowed) == false),
+    SanitizedRequests = countif(tobool(LogEntry.sanitized)),
+    AvgDuration = avg(todouble(LogEntry.duration_ms))
+  by bin(TimeGenerated, 1h)
+| order by TimeGenerated desc
+
+// ============================================
+// 6. Agent Health Check
+// ============================================
+ContainerLog
+| where ContainerName_s == "openclaw-agent"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, LogEntry_s
+| order by TimeGenerated desc
+| take 50
+
+// ============================================
+// 7. POST Content Summaries (MVP2 — for human review)
+// ============================================
+ContainerLog
+| where ContainerName_s == "bun-proxy"
+| where TimeGenerated > ago(24h)
+| extend LogEntry = parse_json(LogEntry_s)
+| where tostring(LogEntry.method) == "POST"
+| where tostring(LogEntry.hostname) == "www.moltbook.com"
+| where tobool(LogEntry.allowed) == true
+| project TimeGenerated, Path = tostring(LogEntry.path), Status = toint(LogEntry.response_status)
+| order by TimeGenerated desc
+
+// ============================================
+// 8. Security Alert: Non-GET to Moltbook (MVP1 violation)
+// ============================================
+ContainerLog
+| where ContainerName_s == "bun-proxy"
+| where TimeGenerated > ago(24h)
+| extend LogEntry = parse_json(LogEntry_s)
+| where tostring(LogEntry.hostname) == "www.moltbook.com"
+| where tostring(LogEntry.method) != "GET"
+| project TimeGenerated, Method = tostring(LogEntry.method), Path = tostring(LogEntry.path), Allowed = tobool(LogEntry.allowed)

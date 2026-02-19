@@ -1,0 +1,197 @@
+@description('ACR login server hostname')
+param acrLoginServer string
+
+@description('ACR resource name (used to retrieve admin credentials)')
+param acrName string
+
+@description('Proxy container image reference (e.g. myacr.azurecr.io/proxy:latest)')
+param proxyImage string
+
+@description('OpenClaw container image reference (e.g. myacr.azurecr.io/openclaw:latest)')
+param openclawImage string
+
+@description('Key Vault name for secret references')
+param vaultName string
+
+@description('Log Analytics workspace resource ID')
+param workspaceId string
+
+@description('Log Analytics workspace shared key')
+@secure()
+param workspaceKey string
+
+@description('Resource ID of the private subnet for OpenClaw')
+param privateSubnetId string
+
+@description('Resource ID of the proxy subnet')
+param proxySubnetId string
+
+@description('Resource ID of the user-assigned managed identity')
+param managedIdentityId string
+
+@description('Client ID of the user-assigned managed identity')
+param managedIdentityClientId string
+
+@description('Azure region for container groups')
+param location string
+
+@description('Project name for resource naming')
+param projectName string = 'openclaw'
+
+@description('Resource tags')
+param tags object = {}
+
+// Reference the existing ACR to retrieve admin credentials
+resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: acrName
+}
+
+// Reference the existing Log Analytics workspace for customer ID
+resource logWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' existing = {
+  name: '${projectName}-logs'
+}
+
+// --- Proxy Container Group ---
+
+resource proxyContainerGroup 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
+  name: '${projectName}-proxy'
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentityId}': {}
+    }
+  }
+  properties: {
+    osType: 'Linux'
+    restartPolicy: 'Always'
+    imageRegistryCredentials: [
+      {
+        server: acrLoginServer
+        username: acr.listCredentials().username
+        password: acr.listCredentials().passwords[0].value
+      }
+    ]
+    subnetIds: [
+      {
+        id: proxySubnetId
+      }
+    ]
+    containers: [
+      {
+        name: 'proxy'
+        properties: {
+          image: proxyImage
+          ports: [
+            {
+              port: 3128
+              protocol: 'TCP'
+            }
+          ]
+          resources: {
+            requests: {
+              cpu: 1
+              memoryInGB: 1
+            }
+          }
+          environmentVariables: [
+            {
+              name: 'PROXY_PORT'
+              value: '3128'
+            }
+          ]
+        }
+      }
+    ]
+    diagnostics: {
+      logAnalytics: {
+        workspaceId: logWorkspace.properties.customerId
+        workspaceKey: workspaceKey
+        logType: 'ContainerInsights'
+      }
+    }
+  }
+}
+
+// --- OpenClaw Container Group ---
+
+resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
+  name: '${projectName}-openclaw'
+  location: location
+  tags: tags
+  dependsOn: [
+    proxyContainerGroup
+  ]
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentityId}': {}
+    }
+  }
+  properties: {
+    osType: 'Linux'
+    restartPolicy: 'Never'
+    imageRegistryCredentials: [
+      {
+        server: acrLoginServer
+        username: acr.listCredentials().username
+        password: acr.listCredentials().passwords[0].value
+      }
+    ]
+    subnetIds: [
+      {
+        id: privateSubnetId
+      }
+    ]
+    containers: [
+      {
+        name: 'openclaw'
+        properties: {
+          image: openclawImage
+          resources: {
+            requests: {
+              cpu: 1
+              memoryInGB: json('1.5')
+            }
+          }
+          environmentVariables: [
+            {
+              name: 'HTTP_PROXY'
+              value: 'http://10.0.2.4:3128'
+            }
+            {
+              name: 'HTTPS_PROXY'
+              value: 'http://10.0.2.4:3128'
+            }
+            {
+              name: 'NO_PROXY'
+              value: '169.254.169.254,168.63.129.16'
+            }
+            {
+              name: 'AZURE_CLIENT_ID'
+              value: managedIdentityClientId
+            }
+            {
+              name: 'KEY_VAULT_NAME'
+              value: vaultName
+            }
+          ]
+        }
+      }
+    ]
+    diagnostics: {
+      logAnalytics: {
+        workspaceId: logWorkspace.properties.customerId
+        workspaceKey: workspaceKey
+        logType: 'ContainerInsights'
+      }
+    }
+  }
+}
+
+@description('Proxy container group resource ID')
+output proxyContainerGroupId string = proxyContainerGroup.id
+
+@description('OpenClaw container group resource ID')
+output openclawContainerGroupId string = openclawContainerGroup.id

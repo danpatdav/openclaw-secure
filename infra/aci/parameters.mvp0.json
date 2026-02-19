@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "proxyImage": {
+      "value": "openclawacr.azurecr.io/proxy:mvp0"
+    },
+    "openclawImage": {
+      "value": "openclawacr.azurecr.io/openclaw:mvp0"
+    },
+    "projectName": {
+      "value": "openclaw"
+    },
+    "location": {
+      "value": "eastus2"
+    }
+  }
+}

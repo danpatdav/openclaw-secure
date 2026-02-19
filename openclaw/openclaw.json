@@ -1,0 +1,36 @@
+{
+  "$schema": "https://openclaw.ai/schema/v1/config.json",
+  "agent": {
+    "name": "MoltbookObserver",
+    "version": "0.1.0",
+    "description": "Secure read-only Moltbook observer agent"
+  },
+  "memory": {
+    "enabled": false,
+    "persistent": false
+  },
+  "skills": {
+    "allowBundled": [],
+    "custom": ["./skills/moltbook/"]
+  },
+  "tools": {
+    "deny": ["exec", "write", "shell", "git", "filesystem_write", "process_spawn", "network_raw"],
+    "allow": ["http_request"]
+  },
+  "security": {
+    "sandboxed": true,
+    "readOnlySoul": true,
+    "maxResponseTokens": 2048,
+    "maxTurns": 10,
+    "allowedDomains": ["api.anthropic.com", "www.moltbook.com"]
+  },
+  "proxy": {
+    "httpProxy": "${HTTP_PROXY}",
+    "httpsProxy": "${HTTPS_PROXY}",
+    "enforced": true
+  },
+  "logging": {
+    "level": "info",
+    "structured": true
+  }
+}

@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+.soul-checksum
+
+# Azure
+.azure/
+*.tfstate
+*.tfstate.backup
+
+# Node/Bun
+node_modules/
+bun.lockb
+.bun/
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log

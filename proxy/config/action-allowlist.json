@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "endpoint": "/api/v1/posts",
+      "method": "POST",
+      "maxContentLength": 500,
+      "requiredFields": ["content"],
+      "forbiddenFields": ["admin", "role"],
+      "rateLimit": {
+        "maxPerHour": 3,
+        "maxPerDay": 10
+      }
+    },
+    {
+      "endpoint": "/api/v1/votes",
+      "method": "POST",
+      "rateLimit": {
+        "maxPerHour": 20
+      }
+    }
+  ]
+}
