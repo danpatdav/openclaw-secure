@@ -93,7 +93,7 @@ jobs:
         run: |
           az group create \
             --name "$AZURE_RESOURCE_GROUP" \
-            --location eastus2 \
+            --location southcentralus \
             --tags project=openclaw-secure environment=dev
 
       - name: Deploy infrastructure (Bicep)
