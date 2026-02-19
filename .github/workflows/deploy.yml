@@ -158,7 +158,7 @@ jobs:
               proxySubnetId="${{ steps.infra.outputs.proxy_subnet }}" \
               managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
               managedIdentityClientId="${{ steps.infra.outputs.identity_client }}" \
-              location=eastus2
+              location=southcentralus
 
       - name: Deployment summary
         run: |
