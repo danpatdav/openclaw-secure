@@ -2,6 +2,10 @@ FROM node:20-slim AS base
 
 WORKDIR /app
 
+# Copy package files and install dependencies
+COPY package.json ./
+RUN npm install --production
+
 # Copy agent runtime and configuration
 COPY agent.mjs ./agent.mjs
 COPY openclaw.json ./openclaw.json
