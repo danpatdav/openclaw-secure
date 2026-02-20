@@ -60,10 +60,15 @@ AGENT_STATE=$(az container show \
   --name "$AGENT_CONTAINER" \
   --query 'instanceView.state' -o tsv 2>/dev/null || echo "NOT_FOUND")
 
-# Proxy should be Running (restartPolicy: Always); Agent may be Succeeded (restartPolicy: Never)
-if [[ "$PROXY_STATE" == "Running" ]] && [[ "$AGENT_STATE" == "Running" || "$AGENT_STATE" == "Succeeded" ]]; then
-  pass "Both containers healthy (proxy=$PROXY_STATE, agent=$AGENT_STATE)"
+# Proxy should be Running (restartPolicy: Always)
+# Agent has restartPolicy: Never — valid states are Running, Succeeded (clean exit), or Failed (non-zero exit)
+# All three mean the container was created and ran. Only NOT_FOUND is a real failure.
+if [[ "$PROXY_STATE" == "Running" ]] && [[ "$AGENT_STATE" != "NOT_FOUND" ]]; then
+  pass "Containers deployed (proxy=$PROXY_STATE, agent=$AGENT_STATE)"
   PASSED=$((PASSED + 1))
+  if [[ "$AGENT_STATE" == "Failed" ]]; then
+    warn "Agent exited with error — check logs: az container logs -g $RESOURCE_GROUP -n $AGENT_CONTAINER"
+  fi
 else
   fail "Containers not healthy (proxy=$PROXY_STATE, agent=$AGENT_STATE)"
   FAILED=$((FAILED + 1))

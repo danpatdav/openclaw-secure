@@ -38,15 +38,8 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
-// Placeholder secret — value must be set manually post-deployment
-resource anthropicApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
-  parent: keyVault
-  name: 'ANTHROPIC-API-KEY'
-  properties: {
-    value: 'REPLACE-ME-POST-DEPLOY'
-    contentType: 'text/plain'
-  }
-}
+// Note: ANTHROPIC-API-KEY secret is managed manually via az keyvault secret set.
+// Do NOT create a placeholder here — Bicep would overwrite the real value on every deploy.
 
 @description('Key Vault URI')
 output vaultUri string = keyVault.properties.vaultUri
