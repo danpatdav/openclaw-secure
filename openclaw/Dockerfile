@@ -20,7 +20,7 @@ USER openclaw
 # Proxy environment variables (injected at runtime via ACI)
 ENV HTTP_PROXY=""
 ENV HTTPS_PROXY=""
-ENV NO_PROXY="169.254.169.254,168.63.129.16,localhost,127.0.0.1"
+ENV NO_PROXY="168.63.129.16,localhost,127.0.0.1"
 ENV SOUL_PATH="/etc/openclaw/SOUL.md"
 ENV CONFIG_PATH="./openclaw.json"
 

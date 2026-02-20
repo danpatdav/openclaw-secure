@@ -41,6 +41,10 @@ param projectName string = 'openclaw'
 @description('MVP level for allowlist config selection')
 param mvpLevel string = 'mvp0'
 
+@description('Anthropic API key (injected from Key Vault at deploy time)')
+@secure()
+param anthropicApiKey string
+
 @description('Resource tags')
 param tags object = {}
 
@@ -173,15 +177,11 @@ resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@202
             }
             {
               name: 'NO_PROXY'
-              value: '169.254.169.254,168.63.129.16'
+              value: '168.63.129.16'
             }
             {
-              name: 'AZURE_CLIENT_ID'
-              value: managedIdentityClientId
-            }
-            {
-              name: 'KEY_VAULT_NAME'
-              value: vaultName
+              name: 'ANTHROPIC_API_KEY'
+              secureValue: anthropicApiKey
             }
           ]
         }

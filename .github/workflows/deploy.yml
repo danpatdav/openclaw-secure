@@ -142,6 +142,19 @@ jobs:
             --workspace-name openclaw-logs \
             --query primarySharedKey -o tsv)
 
+          # Grant deployer access to read KV secrets for injection into ACI
+          DEPLOYER_OID=$(az ad sp show --id "${{ secrets.AZURE_CLIENT_ID }}" --query id -o tsv)
+          az keyvault set-policy \
+            --name "${{ steps.infra.outputs.vault_name }}" \
+            --object-id "$DEPLOYER_OID" \
+            --secret-permissions get \
+            --output none
+
+          ANTHROPIC_KEY=$(az keyvault secret show \
+            --vault-name "${{ steps.infra.outputs.vault_name }}" \
+            --name ANTHROPIC-API-KEY \
+            --query value -o tsv)
+
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --template-file infra/aci/container-group.bicep \
@@ -158,6 +171,7 @@ jobs:
               proxySubnetId="${{ steps.infra.outputs.proxy_subnet }}" \
               managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
               managedIdentityClientId="${{ steps.infra.outputs.identity_client }}" \
+              anthropicApiKey="$ANTHROPIC_KEY" \
               location=southcentralus
 
       - name: Deployment summary
