@@ -63,10 +63,10 @@ AGENT_STATE=$(az container show \
 # Proxy should be Running (restartPolicy: Always); Agent may be Succeeded (restartPolicy: Never)
 if [[ "$PROXY_STATE" == "Running" ]] && [[ "$AGENT_STATE" == "Running" || "$AGENT_STATE" == "Succeeded" ]]; then
   pass "Both containers healthy (proxy=$PROXY_STATE, agent=$AGENT_STATE)"
-  ((PASSED++))
+  PASSED=$((PASSED + 1))
 else
   fail "Containers not healthy (proxy=$PROXY_STATE, agent=$AGENT_STATE)"
-  ((FAILED++))
+  FAILED=$((FAILED + 1))
 fi
 
 # --------------------------------------------------------------------------
@@ -87,10 +87,10 @@ DIRECT_RESULT=$(az container exec \
 
 if [[ -z "$DIRECT_RESULT" || "$DIRECT_RESULT" == *"timed out"* || "$DIRECT_RESULT" == *"Connection refused"* || "$DIRECT_RESULT" == *"error"* ]]; then
   pass "Direct internet access blocked (NSG working)"
-  ((PASSED++))
+  PASSED=$((PASSED + 1))
 else
   fail "Direct internet access succeeded — NSG may not be configured"
-  ((FAILED++))
+  FAILED=$((FAILED + 1))
 fi
 
 # --------------------------------------------------------------------------
@@ -105,10 +105,10 @@ HEALTH_RESULT=$(az container exec \
 
 if [[ -n "$HEALTH_RESULT" && "$HEALTH_RESULT" != *"error"* && "$HEALTH_RESULT" != *"refused"* ]]; then
   pass "Proxy health endpoint reachable"
-  ((PASSED++))
+  PASSED=$((PASSED + 1))
 else
   fail "Cannot reach proxy health endpoint at $PROXY_HEALTH_URL"
-  ((FAILED++))
+  FAILED=$((FAILED + 1))
 fi
 
 # --------------------------------------------------------------------------
@@ -123,10 +123,10 @@ BLOCKED_HTTP_CODE=$(az container exec \
 
 if [[ "$BLOCKED_HTTP_CODE" == *"403"* ]]; then
   pass "Blocked domain correctly returned 403"
-  ((PASSED++))
+  PASSED=$((PASSED + 1))
 else
   fail "Blocked domain returned HTTP $BLOCKED_HTTP_CODE (expected 403)"
-  ((FAILED++))
+  FAILED=$((FAILED + 1))
 fi
 
 # --------------------------------------------------------------------------
@@ -143,10 +143,10 @@ ALLOWED_HTTP_CODE=$(az container exec \
 # 401 or 400 means the proxy allowed the request through to Anthropic
 if [[ "$ALLOWED_HTTP_CODE" == *"401"* || "$ALLOWED_HTTP_CODE" == *"400"* || "$ALLOWED_HTTP_CODE" == *"200"* ]]; then
   pass "Allowed domain passed through proxy (HTTP $ALLOWED_HTTP_CODE)"
-  ((PASSED++))
+  PASSED=$((PASSED + 1))
 else
   fail "Allowed domain returned HTTP $ALLOWED_HTTP_CODE (expected 401/400/200)"
-  ((FAILED++))
+  FAILED=$((FAILED + 1))
 fi
 
 fi  # end of agent-running exec tests (2-5)
@@ -164,7 +164,7 @@ WORKSPACE_ID=$(az monitor log-analytics workspace list \
 if [[ -z "$WORKSPACE_ID" ]]; then
   warn "No Log Analytics workspace found — cannot verify logs"
   fail "Azure Monitor logs not verifiable (no workspace)"
-  ((FAILED++))
+  FAILED=$((FAILED + 1))
 else
   LOG_COUNT=$(az monitor log-analytics query \
     --workspace "$WORKSPACE_ID" \
@@ -173,10 +173,10 @@ else
 
   if [[ "$LOG_COUNT" -gt 0 ]] 2>/dev/null; then
     pass "Found $LOG_COUNT proxy log entries in Azure Monitor"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
   else
     fail "No proxy log entries found in Azure Monitor"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
   fi
 fi
 
