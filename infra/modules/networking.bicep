@@ -44,6 +44,20 @@ resource nsgPrivate 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
         }
       }
       {
+        name: 'AllowIMDSOutbound'
+        properties: {
+          priority: 120
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '80'
+          sourceAddressPrefix: '10.0.1.0/24'
+          destinationAddressPrefix: '169.254.169.254'
+          description: 'Allow access to Azure IMDS for managed identity token acquisition'
+        }
+      }
+      {
         name: 'DenyAllOutbound'
         properties: {
           priority: 4000
