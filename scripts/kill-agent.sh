@@ -25,7 +25,7 @@ warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 RESOURCE_GROUP="${1:-rg-openclaw-secure}"
 
 PROXY_CONTAINER="openclaw-proxy"
-AGENT_CONTAINER="openclaw-agent"
+AGENT_CONTAINER="openclaw-openclaw"
 
 echo ""
 echo -e "${RED}${BOLD}=== OpenClaw Secure — KILL SWITCH ===${NC}"
