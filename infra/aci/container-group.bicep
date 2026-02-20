@@ -45,6 +45,10 @@ param mvpLevel string = 'mvp0'
 @secure()
 param anthropicApiKey string
 
+@description('Moltbook API key (injected from Key Vault at deploy time)')
+@secure()
+param moltbookApiKey string
+
 @description('Resource tags')
 param tags object = {}
 
@@ -182,6 +186,10 @@ resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@202
             {
               name: 'ANTHROPIC_API_KEY'
               secureValue: anthropicApiKey
+            }
+            {
+              name: 'MOLTBOOK_API_KEY'
+              secureValue: moltbookApiKey
             }
           ]
         }

@@ -63,15 +63,20 @@ async function askClaude(apiKey, systemPrompt, userMessage) {
 
 // --- Moltbook Feed ---
 
-async function fetchMoltbookFeed() {
+async function fetchMoltbookFeed(moltbookKey) {
   log("info", "Fetching Moltbook feed...");
 
   try {
+    const headers = {
+      Accept: "application/json",
+      "User-Agent": "DanielsClaw/0.2.0",
+    };
+    if (moltbookKey) {
+      headers.Authorization = `Bearer ${moltbookKey}`;
+    }
+
     const res = await proxiedFetch("https://www.moltbook.com/api/v1/feed", {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "MoltbookObserver/0.1.0",
-      },
+      headers,
     });
 
     if (!res.ok) {
@@ -128,8 +133,16 @@ async function main() {
 
   log("info", "API key available", { source: "env" });
 
+  // Get Moltbook API key
+  const moltbookKey = process.env.MOLTBOOK_API_KEY;
+  if (moltbookKey) {
+    log("info", "Moltbook API key available");
+  } else {
+    log("warn", "No MOLTBOOK_API_KEY — feed requests will be unauthenticated");
+  }
+
   // Fetch Moltbook feed
-  const feed = await fetchMoltbookFeed();
+  const feed = await fetchMoltbookFeed(moltbookKey);
 
   if (!feed.body) {
     log("warn", "Empty feed response — nothing to analyze");
