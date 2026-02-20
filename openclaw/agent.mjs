@@ -3,11 +3,17 @@
 /**
  * OpenClaw Secure Agent — MVP1 Read-Only Observer
  *
- * Fetches API key from Azure Key Vault, reads Moltbook feed through proxy,
- * uses Claude to analyze content, and logs everything structured.
+ * Reads Moltbook feed through proxy, uses Claude to analyze content,
+ * and logs everything structured. API key injected via env var at deploy time.
  */
 
 import { readFileSync } from "node:fs";
+import { ProxyAgent } from "undici";
+
+// --- Proxy Setup ---
+
+const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
 
 // --- Structured Logging ---
 
@@ -22,51 +28,16 @@ function log(level, message, data = {}) {
   process.stdout.write(JSON.stringify(entry) + "\n");
 }
 
-// --- Azure Key Vault (Managed Identity) ---
+// --- Proxied Fetch ---
 
-async function getAccessToken() {
-  const clientId = process.env.AZURE_CLIENT_ID;
-  if (!clientId) {
-    throw new Error("AZURE_CLIENT_ID not set — cannot authenticate to Key Vault");
-  }
-
-  const url = new URL("http://169.254.169.254/metadata/identity/oauth2/token");
-  url.searchParams.set("api-version", "2018-02-01");
-  url.searchParams.set("resource", "https://vault.azure.net");
-  url.searchParams.set("client_id", clientId);
-
-  const res = await fetch(url.toString(), {
-    headers: { Metadata: "true" },
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to get access token: ${res.status} ${await res.text()}`);
-  }
-
-  const data = await res.json();
-  return data.access_token;
-}
-
-async function getSecret(vaultName, secretName) {
-  const token = await getAccessToken();
-  const url = `https://${vaultName}.vault.azure.net/secrets/${secretName}?api-version=7.4`;
-
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to get secret ${secretName}: ${res.status} ${await res.text()}`);
-  }
-
-  const data = await res.json();
-  return data.value;
+function proxiedFetch(url, options = {}) {
+  return fetch(url, { ...options, dispatcher });
 }
 
 // --- Claude API ---
 
 async function askClaude(apiKey, systemPrompt, userMessage) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await proxiedFetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -96,7 +67,7 @@ async function fetchMoltbookFeed() {
   log("info", "Fetching Moltbook feed...");
 
   try {
-    const res = await fetch("https://www.moltbook.com/api/v1/feed", {
+    const res = await proxiedFetch("https://www.moltbook.com/api/v1/feed", {
       headers: {
         Accept: "application/json",
         "User-Agent": "MoltbookObserver/0.1.0",
@@ -108,7 +79,6 @@ async function fetchMoltbookFeed() {
         status: res.status,
         statusText: res.statusText,
       });
-      // Return the response body even on error for analysis
       const body = await res.text();
       return { status: res.status, body, ok: false };
     }
@@ -131,9 +101,10 @@ async function fetchMoltbookFeed() {
 
 async function main() {
   log("info", "Agent starting", {
-    version: "0.1.0",
+    version: "0.2.0",
     mvp: "mvp1",
     mode: "read-only-observer",
+    proxy: proxyUrl || "none",
   });
 
   // Load SOUL
@@ -147,33 +118,15 @@ async function main() {
     process.exit(1);
   }
 
-  // Get API key from Key Vault
-  const vaultName = process.env.KEY_VAULT_NAME;
-  let apiKey;
-
-  if (vaultName) {
-    try {
-      log("info", "Fetching API key from Key Vault", { vault: vaultName });
-      apiKey = await getSecret(vaultName, "ANTHROPIC-API-KEY");
-      log("info", "API key retrieved from Key Vault");
-    } catch (err) {
-      log("error", "Failed to get API key from Key Vault", {
-        vault: vaultName,
-        error: err.message,
-      });
-      // Fall back to env var
-      apiKey = process.env.ANTHROPIC_API_KEY;
-    }
-  } else {
-    apiKey = process.env.ANTHROPIC_API_KEY;
-  }
+  // Get API key from env (injected securely from Key Vault at deploy time)
+  const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey || apiKey === "REPLACE-ME-POST-DEPLOY") {
     log("error", "No valid API key available — cannot proceed");
     process.exit(1);
   }
 
-  log("info", "API key available", { source: vaultName ? "keyvault" : "env" });
+  log("info", "API key available", { source: "env" });
 
   // Fetch Moltbook feed
   const feed = await fetchMoltbookFeed();
