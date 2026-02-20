@@ -96,7 +96,7 @@ resource nsgProxy 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
         }
       }
       {
-        name: 'AllowAnthropicOutbound'
+        name: 'AllowHTTPSOutbound'
         properties: {
           priority: 100
           direction: 'Outbound'
@@ -105,14 +105,12 @@ resource nsgProxy 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
           sourcePortRange: '*'
           destinationPortRange: '443'
           sourceAddressPrefix: '10.0.2.0/24'
-          // Anthropic API (api.anthropic.com) resolves to Cloudflare IPs.
-          // NSG enforces port 443 only; proxy application layer enforces
-          // domain-level allowlisting to api.anthropic.com exclusively.
-          destinationAddressPrefixes: [
-            '104.18.0.0/16'   // Cloudflare range serving api.anthropic.com
-            '172.64.0.0/16'   // Cloudflare range serving api.anthropic.com
-          ]
-          description: 'Allow outbound HTTPS to Anthropic API (Cloudflare IPs) only'
+          destinationAddressPrefix: 'Internet'
+          // NSG allows HTTPS to any destination. Domain-level filtering is
+          // enforced by the proxy application layer (allowlist.json).
+          // This supports MVP1+ where multiple domains (Anthropic, Moltbook)
+          // may resolve to different/changing IP ranges.
+          description: 'Allow outbound HTTPS — proxy enforces domain allowlist'
         }
       }
       {

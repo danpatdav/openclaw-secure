@@ -38,6 +38,9 @@ param location string
 @description('Project name for resource naming')
 param projectName string = 'openclaw'
 
+@description('MVP level for allowlist config selection')
+param mvpLevel string = 'mvp0'
+
 @description('Resource tags')
 param tags object = {}
 
@@ -99,6 +102,10 @@ resource proxyContainerGroup 'Microsoft.ContainerInstance/containerGroups@2023-0
             {
               name: 'PROXY_PORT'
               value: '3128'
+            }
+            {
+              name: 'ALLOWLIST_CONFIG'
+              value: './config/allowlist.${mvpLevel}.json'
             }
           ]
         }
