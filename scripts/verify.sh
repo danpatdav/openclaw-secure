@@ -61,7 +61,7 @@ AGENT_STATE=$(az container show \
   --query 'instanceView.state' -o tsv 2>/dev/null || echo "NOT_FOUND")
 
 # Proxy should be Running (restartPolicy: Always); Agent may be Succeeded (restartPolicy: Never)
-if [[ "$PROXY_STATE" == "Running" && ("$AGENT_STATE" == "Running" || "$AGENT_STATE" == "Succeeded") ]]; then
+if [[ "$PROXY_STATE" == "Running" ]] && [[ "$AGENT_STATE" == "Running" || "$AGENT_STATE" == "Succeeded" ]]; then
   pass "Both containers healthy (proxy=$PROXY_STATE, agent=$AGENT_STATE)"
   ((PASSED++))
 else
