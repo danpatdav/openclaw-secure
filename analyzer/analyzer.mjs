@@ -173,9 +173,12 @@ async function askClaude(analysisPayload) {
   const data = await res.json();
   const text = data.content[0]?.text || "";
   try {
-    return JSON.parse(text);
+    // Claude often wraps JSON in markdown code blocks — extract the JSON
+    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = jsonMatch ? jsonMatch[1].trim() : text;
+    return JSON.parse(jsonStr);
   } catch {
-    log("warn", "Claude response not valid JSON — treating as suspicious", { text: text.slice(0, 200) });
+    log("warn", "Claude response not valid JSON — treating as suspicious", { text: text.slice(0, 500) });
     return { verdict: "suspicious", confidence: 0.5, findings: ["Non-JSON response"], risk_factors: ["parsing_error"], recommendation: "manual_review" };
   }
 }
@@ -206,9 +209,11 @@ async function askOpenAI(analysisPayload) {
   const data = await res.json();
   const text = data.choices[0]?.message?.content || "";
   try {
-    return JSON.parse(text);
+    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = jsonMatch ? jsonMatch[1].trim() : text;
+    return JSON.parse(jsonStr);
   } catch {
-    log("warn", "OpenAI response not valid JSON — treating as suspicious", { text: text.slice(0, 200) });
+    log("warn", "OpenAI response not valid JSON — treating as suspicious", { text: text.slice(0, 500) });
     return { verdict: "suspicious", confidence: 0.5, findings: ["Non-JSON response"], risk_factors: ["parsing_error"], recommendation: "manual_review" };
   }
 }
