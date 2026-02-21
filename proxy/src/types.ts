@@ -27,3 +27,45 @@ export interface SanitizeResult {
   sanitized: boolean;
   patterns: string[];
 }
+
+export interface MemoryFile {
+  version: number;
+  run_id: string;
+  run_start: string;
+  run_end: string;
+  entries: MemoryEntry[];
+  stats: MemoryStats;
+}
+
+export type MemoryEntry = PostSeenEntry | PostMadeEntry | ThreadTrackedEntry;
+
+export interface PostSeenEntry {
+  type: "post_seen";
+  post_id: string;
+  timestamp: string;
+  topic_label: string;
+  sentiment: string;
+}
+
+export interface PostMadeEntry {
+  type: "post_made";
+  post_id: string;
+  thread_id: string;
+  timestamp: string;
+  action: string;
+}
+
+export interface ThreadTrackedEntry {
+  type: "thread_tracked";
+  thread_id: string;
+  topic_label: string;
+  first_seen: string;
+  last_interaction: string;
+}
+
+export interface MemoryStats {
+  posts_read: number;
+  posts_made: number;
+  upvotes: number;
+  threads_tracked: number;
+}

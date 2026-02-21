@@ -49,6 +49,12 @@ param anthropicApiKey string
 @secure()
 param moltbookApiKey string
 
+@description('Storage account name for agent memory')
+param storageAccountName string
+
+@description('Blob container name for agent memory')
+param memoryContainerName string = 'agent-memory'
+
 @description('Resource tags')
 param tags object = {}
 
@@ -114,6 +120,14 @@ resource proxyContainerGroup 'Microsoft.ContainerInstance/containerGroups@2023-0
             {
               name: 'ALLOWLIST_CONFIG'
               value: './config/allowlist.${mvpLevel}.json'
+            }
+            {
+              name: 'AZURE_STORAGE_ACCOUNT_NAME'
+              value: storageAccountName
+            }
+            {
+              name: 'MEMORY_CONTAINER_NAME'
+              value: memoryContainerName
             }
           ]
         }
@@ -190,6 +204,10 @@ resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@202
             {
               name: 'MOLTBOOK_API_KEY'
               secureValue: moltbookApiKey
+            }
+            {
+              name: 'RUN_DURATION_HOURS'
+              value: '4'
             }
           ]
         }

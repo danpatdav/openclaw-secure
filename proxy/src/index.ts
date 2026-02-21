@@ -2,6 +2,7 @@ import { createServer as createNetServer, Socket } from "node:net";
 import { loadAllowlist, isAllowed, getConfig } from "./allowlist";
 import { log, logError } from "./logger";
 import { sanitize } from "./sanitizer";
+import { handleMemoryRequest } from "./memory-store";
 import type { ProxyLogEntry } from "./types";
 
 const PORT = parseInt(process.env.PORT || "3128", 10);
@@ -158,6 +159,14 @@ async function handleHttp(
           `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
         );
         clientSocket.end();
+        return;
+      }
+
+      // Memory API endpoint
+      if (target.startsWith("/memory")) {
+        const headerEndIdx = rawData.indexOf("\r\n\r\n");
+        const bodyData = headerEndIdx >= 0 ? rawData.subarray(headerEndIdx + 4) : undefined;
+        await handleMemoryRequest(clientSocket, method, target, bodyData ? Buffer.from(bodyData) : undefined);
         return;
       }
 

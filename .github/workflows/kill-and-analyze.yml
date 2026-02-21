@@ -1,0 +1,184 @@
+name: Kill and Analyze
+
+on:
+  schedule:
+    - cron: '0 4,9,14,19 * * *'  # 4-hour offset from start
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: rg-openclaw-secure
+
+jobs:
+  analyze:
+    name: Kill Agent and Run Analyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Stop agent container
+        run: |
+          echo "Stopping agent container..."
+          az container stop \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name openclaw-openclaw \
+            --output none 2>/dev/null || echo "Agent not running"
+
+          # Wait for SIGTERM to propagate and memory to save
+          sleep 15
+
+          echo "Deleting agent container..."
+          az container delete \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name openclaw-openclaw \
+            --yes \
+            --output none 2>/dev/null || echo "Agent already deleted"
+
+      - name: Get infrastructure outputs
+        id: infra
+        run: |
+          STORAGE_NAME=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.storageAccountName.value' -o tsv)
+          ACR_LOGIN=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.acrLoginServer.value' -o tsv)
+          ACR_NAME=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.acrName.value' -o tsv)
+          VAULT_NAME=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.vaultName.value' -o tsv)
+          IDENTITY_ID=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.managedIdentityId.value' -o tsv)
+          IDENTITY_CLIENT=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.managedIdentityClientId.value' -o tsv)
+          WORKSPACE_ID=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.workspaceId.value' -o tsv)
+          ANALYZER_SUBNET=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.analyzerSubnetId.value' -o tsv)
+
+          echo "storage_name=$STORAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "acr_login=$ACR_LOGIN" >> "$GITHUB_OUTPUT"
+          echo "acr_name=$ACR_NAME" >> "$GITHUB_OUTPUT"
+          echo "vault_name=$VAULT_NAME" >> "$GITHUB_OUTPUT"
+          echo "identity_id=$IDENTITY_ID" >> "$GITHUB_OUTPUT"
+          echo "identity_client=$IDENTITY_CLIENT" >> "$GITHUB_OUTPUT"
+          echo "workspace_id=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
+          echo "analyzer_subnet=$ANALYZER_SUBNET" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy analyzer container
+        run: |
+          WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --workspace-name openclaw-logs \
+            --query primarySharedKey -o tsv)
+
+          DEPLOYER_OID=$(az ad sp show --id "${{ secrets.AZURE_CLIENT_ID }}" --query id -o tsv)
+          az keyvault set-policy \
+            --name "${{ steps.infra.outputs.vault_name }}" \
+            --object-id "$DEPLOYER_OID" \
+            --secret-permissions get \
+            --output none
+
+          ANTHROPIC_KEY=$(az keyvault secret show \
+            --vault-name "${{ steps.infra.outputs.vault_name }}" \
+            --name ANTHROPIC-API-KEY \
+            --query value -o tsv)
+
+          OPENAI_KEY=$(az keyvault secret show \
+            --vault-name "${{ steps.infra.outputs.vault_name }}" \
+            --name OPENAI-API-KEY \
+            --query value -o tsv)
+
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/aci/analyzer-group.bicep \
+            --parameters \
+              acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
+              acrName="${{ steps.infra.outputs.acr_name }}" \
+              analyzerImage="${{ steps.infra.outputs.acr_login }}/openclaw-analyzer:latest" \
+              vaultName="${{ steps.infra.outputs.vault_name }}" \
+              workspaceId="${{ steps.infra.outputs.workspace_id }}" \
+              workspaceKey="$WORKSPACE_KEY" \
+              analyzerSubnetId="${{ steps.infra.outputs.analyzer_subnet }}" \
+              managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
+              managedIdentityClientId="${{ steps.infra.outputs.identity_client }}" \
+              anthropicApiKey="$ANTHROPIC_KEY" \
+              openaiApiKey="$OPENAI_KEY" \
+              storageAccountName="${{ steps.infra.outputs.storage_name }}" \
+              location=southcentralus
+
+      - name: Poll for analyzer completion
+        id: poll
+        run: |
+          echo "Waiting for analyzer to complete..."
+          MAX_WAIT=600  # 10 minutes
+          ELAPSED=0
+          INTERVAL=30
+
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            STATE=$(az container show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name openclaw-analyzer \
+              --query 'instanceView.state' -o tsv 2>/dev/null || echo "NotFound")
+
+            echo "Analyzer state: $STATE (${ELAPSED}s elapsed)"
+
+            if [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Terminated" ] || [ "$STATE" = "Failed" ]; then
+              echo "Analyzer finished with state: $STATE"
+              echo "state=$STATE" >> "$GITHUB_OUTPUT"
+              break
+            fi
+
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          if [ $ELAPSED -ge $MAX_WAIT ]; then
+            echo "::warning::Analyzer timed out after ${MAX_WAIT}s"
+            echo "state=Timeout" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read verdict
+        id: verdict
+        run: |
+          STORAGE_NAME="${{ steps.infra.outputs.storage_name }}"
+
+          LATEST_VERDICT=$(az storage blob list \
+            --account-name "$STORAGE_NAME" \
+            --container-name agent-memory \
+            --prefix "verdicts/" \
+            --auth-mode login \
+            --query "sort_by([?name != null], &properties.lastModified)[-1].name" \
+            -o tsv 2>/dev/null || echo "")
+
+          if [ -z "$LATEST_VERDICT" ] || [ "$LATEST_VERDICT" = "null" ]; then
+            echo "::error::No verdict found after analyzer run"
+            echo "verdict=unknown" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          VERDICT_JSON=$(az storage blob download \
+            --account-name "$STORAGE_NAME" \
+            --container-name agent-memory \
+            --name "$LATEST_VERDICT" \
+            --auth-mode login \
+            -o tsv 2>/dev/null || echo "{}")
+
+          VERDICT=$(echo "$VERDICT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('verdict','unknown'))" 2>/dev/null || echo "unknown")
+
+          echo "Verdict: $VERDICT"
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+
+          if [ "$VERDICT" = "blocked" ]; then
+            echo "::error::Agent behavior flagged as ANOMALOUS — next run will be blocked"
+            exit 1
+          fi
+
+      - name: Clean up analyzer container
+        if: always()
+        run: |
+          az container delete \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name openclaw-analyzer \
+            --yes \
+            --output none 2>/dev/null || true

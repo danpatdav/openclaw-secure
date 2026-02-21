@@ -1,0 +1,143 @@
+name: Start Agent
+
+on:
+  schedule:
+    - cron: '0 */5 * * *'  # Every 5 hours
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_RESOURCE_GROUP: rg-openclaw-secure
+  STORAGE_ACCOUNT_NAME: ''  # Set dynamically
+
+jobs:
+  start:
+    name: Start Agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get infrastructure outputs
+        id: infra
+        run: |
+          STORAGE_NAME=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.storageAccountName.value' -o tsv 2>/dev/null || echo "")
+          ACR_LOGIN=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.acrLoginServer.value' -o tsv)
+          ACR_NAME=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.acrName.value' -o tsv)
+          VAULT_NAME=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.vaultName.value' -o tsv)
+          IDENTITY_ID=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.managedIdentityId.value' -o tsv)
+          IDENTITY_CLIENT=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.managedIdentityClientId.value' -o tsv)
+          WORKSPACE_ID=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.workspaceId.value' -o tsv)
+          PRIVATE_SUBNET=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.privateSubnetId.value' -o tsv)
+          PROXY_SUBNET=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.proxySubnetId.value' -o tsv)
+
+          echo "storage_name=$STORAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "acr_login=$ACR_LOGIN" >> "$GITHUB_OUTPUT"
+          echo "acr_name=$ACR_NAME" >> "$GITHUB_OUTPUT"
+          echo "vault_name=$VAULT_NAME" >> "$GITHUB_OUTPUT"
+          echo "identity_id=$IDENTITY_ID" >> "$GITHUB_OUTPUT"
+          echo "identity_client=$IDENTITY_CLIENT" >> "$GITHUB_OUTPUT"
+          echo "workspace_id=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
+          echo "private_subnet=$PRIVATE_SUBNET" >> "$GITHUB_OUTPUT"
+          echo "proxy_subnet=$PROXY_SUBNET" >> "$GITHUB_OUTPUT"
+
+      - name: Check latest verdict
+        id: verdict
+        run: |
+          STORAGE_NAME="${{ steps.infra.outputs.storage_name }}"
+          if [ -z "$STORAGE_NAME" ]; then
+            echo "No storage account found — skipping verdict check (first run)"
+            echo "approved=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # List verdict blobs, get the most recent
+          LATEST_VERDICT=$(az storage blob list \
+            --account-name "$STORAGE_NAME" \
+            --container-name agent-memory \
+            --prefix "verdicts/" \
+            --auth-mode login \
+            --query "sort_by([?name != null], &properties.lastModified)[-1].name" \
+            -o tsv 2>/dev/null || echo "")
+
+          if [ -z "$LATEST_VERDICT" ] || [ "$LATEST_VERDICT" = "null" ]; then
+            echo "No verdicts found — allowing first run"
+            echo "approved=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERDICT_CONTENT=$(az storage blob download \
+            --account-name "$STORAGE_NAME" \
+            --container-name agent-memory \
+            --name "$LATEST_VERDICT" \
+            --auth-mode login \
+            --query content -o tsv 2>/dev/null || echo "")
+
+          VERDICT=$(echo "$VERDICT_CONTENT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('verdict','unknown'))" 2>/dev/null || echo "unknown")
+
+          echo "Latest verdict: $VERDICT (from $LATEST_VERDICT)"
+
+          if [ "$VERDICT" = "blocked" ]; then
+            echo "::error::Latest verdict is BLOCKED — refusing to start agent"
+            echo "approved=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo "approved=true" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy agent container group
+        if: steps.verdict.outputs.approved == 'true'
+        run: |
+          WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --workspace-name openclaw-logs \
+            --query primarySharedKey -o tsv)
+
+          DEPLOYER_OID=$(az ad sp show --id "${{ secrets.AZURE_CLIENT_ID }}" --query id -o tsv)
+          az keyvault set-policy \
+            --name "${{ steps.infra.outputs.vault_name }}" \
+            --object-id "$DEPLOYER_OID" \
+            --secret-permissions get \
+            --output none
+
+          ANTHROPIC_KEY=$(az keyvault secret show \
+            --vault-name "${{ steps.infra.outputs.vault_name }}" \
+            --name ANTHROPIC-API-KEY \
+            --query value -o tsv)
+
+          MOLTBOOK_KEY=$(az keyvault secret show \
+            --vault-name "${{ steps.infra.outputs.vault_name }}" \
+            --name MOLTBOOK-API-KEY \
+            --query value -o tsv 2>/dev/null || echo "")
+
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/aci/container-group.bicep \
+            --parameters infra/aci/parameters.mvp1.json \
+            --parameters \
+              acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
+              acrName="${{ steps.infra.outputs.acr_name }}" \
+              proxyImage="${{ steps.infra.outputs.acr_login }}/openclaw-proxy:mvp1" \
+              openclawImage="${{ steps.infra.outputs.acr_login }}/openclaw-agent:mvp1" \
+              vaultName="${{ steps.infra.outputs.vault_name }}" \
+              workspaceId="${{ steps.infra.outputs.workspace_id }}" \
+              workspaceKey="$WORKSPACE_KEY" \
+              privateSubnetId="${{ steps.infra.outputs.private_subnet }}" \
+              proxySubnetId="${{ steps.infra.outputs.proxy_subnet }}" \
+              managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
+              managedIdentityClientId="${{ steps.infra.outputs.identity_client }}" \
+              anthropicApiKey="$ANTHROPIC_KEY" \
+              moltbookApiKey="$MOLTBOOK_KEY" \
+              storageAccountName="${{ steps.infra.outputs.storage_name }}" \
+              location=southcentralus
+
+          echo "Agent deployed successfully"

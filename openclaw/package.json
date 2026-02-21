@@ -1,9 +1,10 @@
 {
   "name": "openclaw-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "private": true,
   "dependencies": {
-    "undici": "^6.21.0"
+    "undici": "^6.21.0",
+    "uuid": "^9.0.0"
   }
 }

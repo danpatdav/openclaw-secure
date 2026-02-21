@@ -145,6 +145,58 @@ resource nsgProxy 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
   }
 }
 
+resource nsgAnalyzer 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
+  name: '${projectName}-nsg-analyzer'
+  location: location
+  tags: tags
+  properties: {
+    securityRules: [
+      {
+        name: 'AllowHTTPSOutbound'
+        properties: {
+          priority: 100
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: 'Tcp'
+          sourcePortRange: '*'
+          destinationPortRange: '443'
+          sourceAddressPrefix: '10.0.3.0/24'
+          destinationAddressPrefix: 'Internet'
+          description: 'Allow outbound HTTPS from analyzer subnet'
+        }
+      }
+      {
+        name: 'AllowDNSOutbound'
+        properties: {
+          priority: 110
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: 'Udp'
+          sourcePortRange: '*'
+          destinationPortRange: '53'
+          sourceAddressPrefix: '10.0.3.0/24'
+          destinationAddressPrefix: '168.63.129.16'
+          description: 'Allow DNS resolution via Azure DNS for analyzer'
+        }
+      }
+      {
+        name: 'DenyAllOutbound'
+        properties: {
+          priority: 4000
+          direction: 'Outbound'
+          access: 'Deny'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRange: '*'
+          sourceAddressPrefix: '*'
+          destinationAddressPrefix: '*'
+          description: 'Deny all other outbound traffic from analyzer subnet'
+        }
+      }
+    ]
+  }
+}
+
 // --- Virtual Network ---
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
@@ -192,6 +244,23 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
           ]
         }
       }
+      {
+        name: 'analyzer-subnet'
+        properties: {
+          addressPrefix: '10.0.3.0/24'
+          networkSecurityGroup: {
+            id: nsgAnalyzer.id
+          }
+          delegations: [
+            {
+              name: 'aci-delegation'
+              properties: {
+                serviceName: 'Microsoft.ContainerInstance/containerGroups'
+              }
+            }
+          ]
+        }
+      }
     ]
   }
 }
@@ -204,3 +273,6 @@ output privateSubnetId string = vnet.properties.subnets[0].id
 
 @description('Resource ID of the proxy subnet')
 output proxySubnetId string = vnet.properties.subnets[1].id
+
+@description('Resource ID of the analyzer subnet')
+output analyzerSubnetId string = vnet.properties.subnets[2].id

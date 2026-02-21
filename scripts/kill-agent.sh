@@ -26,6 +26,7 @@ RESOURCE_GROUP="${1:-rg-openclaw-secure}"
 
 PROXY_CONTAINER="openclaw-proxy"
 AGENT_CONTAINER="openclaw-openclaw"
+ANALYZER_CONTAINER="openclaw-analyzer"
 
 echo ""
 echo -e "${RED}${BOLD}=== OpenClaw Secure — KILL SWITCH ===${NC}"
@@ -48,6 +49,12 @@ az container stop \
   --name "$AGENT_CONTAINER" \
   --output none 2>/dev/null && ok "Stopped $AGENT_CONTAINER" || warn "$AGENT_CONTAINER not found or already stopped"
 
+info "Stopping container group: $ANALYZER_CONTAINER..."
+az container stop \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$ANALYZER_CONTAINER" \
+  --output none 2>/dev/null && ok "Stopped $ANALYZER_CONTAINER" || warn "$ANALYZER_CONTAINER not found or already stopped"
+
 # --------------------------------------------------------------------------
 # Delete containers
 # --------------------------------------------------------------------------
@@ -65,6 +72,13 @@ az container delete \
   --yes \
   --output none 2>/dev/null && ok "Deleted $AGENT_CONTAINER" || warn "$AGENT_CONTAINER already deleted"
 
+info "Deleting container group: $ANALYZER_CONTAINER..."
+az container delete \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$ANALYZER_CONTAINER" \
+  --yes \
+  --output none 2>/dev/null && ok "Deleted $ANALYZER_CONTAINER" || warn "$ANALYZER_CONTAINER already deleted"
+
 # --------------------------------------------------------------------------
 # Verify deletion (expect errors = success)
 # --------------------------------------------------------------------------
@@ -80,10 +94,15 @@ AGENT_EXISTS=$(az container show \
   --name "$AGENT_CONTAINER" \
   --query 'name' -o tsv 2>/dev/null || echo "DELETED")
 
-if [[ "$PROXY_EXISTS" == "DELETED" && "$AGENT_EXISTS" == "DELETED" ]]; then
-  ok "Both container groups confirmed deleted."
+ANALYZER_EXISTS=$(az container show \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$ANALYZER_CONTAINER" \
+  --query 'name' -o tsv 2>/dev/null || echo "DELETED")
+
+if [[ "$PROXY_EXISTS" == "DELETED" && "$AGENT_EXISTS" == "DELETED" && "$ANALYZER_EXISTS" == "DELETED" ]]; then
+  ok "All container groups confirmed deleted."
 else
-  err "One or more containers may still exist (proxy=$PROXY_EXISTS, agent=$AGENT_EXISTS)"
+  err "One or more containers may still exist (proxy=$PROXY_EXISTS, agent=$AGENT_EXISTS, analyzer=$ANALYZER_EXISTS)"
 fi
 
 # --------------------------------------------------------------------------

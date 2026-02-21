@@ -57,6 +57,7 @@ jobs:
         run: |
           az bicep build --file infra/main.bicep --stdout > /dev/null
           az bicep build --file infra/aci/container-group.bicep --stdout > /dev/null
+          az bicep build --file infra/aci/analyzer-group.bicep --stdout > /dev/null
 
       - name: Secrets scan
         run: |
@@ -135,6 +136,9 @@ jobs:
           docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-agent:$MVP_LEVEL" openclaw/
           docker push "${{ steps.infra.outputs.acr_login }}/openclaw-agent:$MVP_LEVEL"
 
+          docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-analyzer:latest" analyzer/
+          docker push "${{ steps.infra.outputs.acr_login }}/openclaw-analyzer:latest"
+
       - name: Deploy ACI container groups
         run: |
           WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys \
@@ -178,6 +182,7 @@ jobs:
               managedIdentityClientId="${{ steps.infra.outputs.identity_client }}" \
               anthropicApiKey="$ANTHROPIC_KEY" \
               moltbookApiKey="$MOLTBOOK_KEY" \
+              storageAccountName="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.storageAccountName.value' -o tsv)" \
               location=southcentralus
 
       - name: Deployment summary

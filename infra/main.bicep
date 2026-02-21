@@ -56,6 +56,16 @@ module monitoring 'modules/monitoring.bicep' = {
   }
 }
 
+module storage 'modules/storage.bicep' = {
+  name: 'storage'
+  params: {
+    location: location
+    projectName: projectName
+    tags: tags
+    managedIdentityPrincipalId: managedIdentity.properties.principalId
+  }
+}
+
 // --- Outputs ---
 
 @description('Virtual Network resource ID')
@@ -99,3 +109,9 @@ output managedIdentityClientId string = managedIdentity.properties.clientId
 
 @description('Managed Identity principal ID')
 output managedIdentityPrincipalId string = managedIdentity.properties.principalId
+
+@description('Storage account name')
+output storageAccountName string = storage.outputs.storageAccountName
+
+@description('Analyzer subnet resource ID')
+output analyzerSubnetId string = networking.outputs.analyzerSubnetId
