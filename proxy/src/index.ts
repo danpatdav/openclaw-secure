@@ -165,8 +165,34 @@ async function handleHttp(
       // Memory API endpoint
       if (target.startsWith("/memory")) {
         const headerEndIdx = rawData.indexOf("\r\n\r\n");
-        const bodyData = headerEndIdx >= 0 ? rawData.subarray(headerEndIdx + 4) : undefined;
-        await handleMemoryRequest(clientSocket, method, target, bodyData ? Buffer.from(bodyData) : undefined);
+        const initialBody = headerEndIdx >= 0 ? rawData.subarray(headerEndIdx + 4) : Buffer.alloc(0);
+
+        // Parse Content-Length to know how much body to expect
+        const clMatch = headerStr.match(/^Content-Length:\s*(\d+)$/im);
+        const contentLength = clMatch ? parseInt(clMatch[1], 10) : 0;
+
+        if (method === "POST" && contentLength > 0 && initialBody.length < contentLength) {
+          // Body is split across TCP chunks — buffer the rest
+          let bodyBuffer = Buffer.from(initialBody);
+          const onBodyData = (chunk: Buffer) => {
+            bodyBuffer = Buffer.concat([bodyBuffer, chunk]);
+            if (bodyBuffer.length >= contentLength) {
+              clientSocket.removeListener("data", onBodyData);
+              handleMemoryRequest(clientSocket, method, target, bodyBuffer.subarray(0, contentLength));
+            }
+          };
+          clientSocket.on("data", onBodyData);
+          // Timeout to avoid hanging on incomplete requests
+          setTimeout(() => {
+            clientSocket.removeListener("data", onBodyData);
+            if (bodyBuffer.length < contentLength) {
+              clientSocket.write("HTTP/1.1 408 Request Timeout\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Body read timeout\"}");
+              clientSocket.end();
+            }
+          }, 30000);
+        } else {
+          await handleMemoryRequest(clientSocket, method, target, initialBody.length > 0 ? Buffer.from(initialBody) : undefined);
+        }
         return;
       }
 

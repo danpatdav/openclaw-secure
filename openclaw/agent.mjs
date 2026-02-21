@@ -35,6 +35,7 @@ const trackedThreads = new Map();
 const postsMade = [];
 let postsReadCount = 0;
 let upvotesCount = 0;
+let checkpointNum = 0;
 
 // --- Structured Logging ---
 
@@ -123,9 +124,10 @@ function buildMemoryPayload() {
     entries.push(post);
   }
 
+  checkpointNum++;
   return {
     version: 1,
-    run_id: runId,
+    run_id: `${runId}-cp${checkpointNum}`,
     run_start: runStart,
     run_end: new Date().toISOString(),
     entries: entries.slice(0, 10000), // respect max entries limit
