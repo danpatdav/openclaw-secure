@@ -62,7 +62,6 @@ module storage 'modules/storage.bicep' = {
     location: location
     projectName: projectName
     tags: tags
-    managedIdentityPrincipalId: managedIdentity.properties.principalId
   }
 }
 

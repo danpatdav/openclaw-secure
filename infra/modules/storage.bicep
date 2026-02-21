@@ -7,9 +7,6 @@ param projectName string
 @description('Resource tags')
 param tags object = {}
 
-@description('Principal ID of the managed identity for RBAC assignment')
-param managedIdentityPrincipalId string
-
 // --- Storage Account ---
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
@@ -73,21 +70,6 @@ resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2
         }
       ]
     }
-  }
-}
-
-// --- RBAC: Storage Blob Data Contributor for Managed Identity ---
-
-@description('Storage Blob Data Contributor role definition ID')
-var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
-
-resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, managedIdentityPrincipalId, storageBlobDataContributorRoleId)
-  scope: storageAccount
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
-    principalId: managedIdentityPrincipalId
-    principalType: 'ServicePrincipal'
   }
 }
 

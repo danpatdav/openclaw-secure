@@ -126,6 +126,18 @@ jobs:
           echo "private_subnet=$PRIVATE_SUBNET" >> "$GITHUB_OUTPUT"
           echo "proxy_subnet=$PROXY_SUBNET" >> "$GITHUB_OUTPUT"
 
+      - name: Assign Storage Blob Data Contributor to managed identity
+        run: |
+          IDENTITY_PRINCIPAL=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.managedIdentityPrincipalId.value' -o tsv)
+          STORAGE_ACCOUNT=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.storageAccountName.value' -o tsv)
+          STORAGE_ID=$(az storage account show --name "$STORAGE_ACCOUNT" --resource-group "$AZURE_RESOURCE_GROUP" --query id -o tsv)
+          az role assignment create \
+            --assignee-object-id "$IDENTITY_PRINCIPAL" \
+            --assignee-principal-type ServicePrincipal \
+            --role "Storage Blob Data Contributor" \
+            --scope "$STORAGE_ID" \
+            --output none 2>/dev/null || echo "Role assignment already exists or requires elevated permissions — skipping"
+
       - name: Build and push images
         run: |
           az acr login --name "${{ steps.infra.outputs.acr_name }}"
