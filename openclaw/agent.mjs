@@ -208,7 +208,12 @@ async function fetchMoltbookFeed(moltbookKey) {
       headers.Authorization = `Bearer ${moltbookKey}`;
     }
 
-    const res = await proxiedFetch("https://www.moltbook.com/api/v1/feed", {
+    // Use sort=new for chronological feed, limit=50 for broader coverage
+    const feedUrl = new URL("https://www.moltbook.com/api/v1/feed");
+    feedUrl.searchParams.set("sort", "new");
+    feedUrl.searchParams.set("limit", "50");
+
+    const res = await proxiedFetch(feedUrl.toString(), {
       headers,
     });
 
@@ -239,12 +244,11 @@ async function fetchMoltbookFeed(moltbookKey) {
 
 function extractPostIds(feedBody) {
   try {
-    const data = JSON.parse(feedBody);
-    if (Array.isArray(data)) {
-      return data.filter(p => p.id).map(p => String(p.id));
-    }
-    if (data.posts && Array.isArray(data.posts)) {
-      return data.posts.filter(p => p.id).map(p => String(p.id));
+    const parsed = JSON.parse(feedBody);
+    // Handle various response shapes: {data: [...]}, {posts: [...]}, or [...]
+    const posts = parsed.data || parsed.posts || (Array.isArray(parsed) ? parsed : []);
+    if (Array.isArray(posts)) {
+      return posts.filter(p => p.id).map(p => String(p.id));
     }
   } catch {
     // Not JSON or unexpected structure — return empty
