@@ -148,7 +148,7 @@ jobs:
             --account-name "$STORAGE_NAME" \
             --container-name agent-memory \
             --prefix "verdicts/" \
-            --auth-mode login \
+            --auth-mode key \
             --query "sort_by([?name != null], &properties.lastModified)[-1].name" \
             -o tsv 2>/dev/null || echo "")
 
@@ -158,14 +158,15 @@ jobs:
             exit 1
           fi
 
-          VERDICT_JSON=$(az storage blob download \
+          az storage blob download \
             --account-name "$STORAGE_NAME" \
             --container-name agent-memory \
             --name "$LATEST_VERDICT" \
-            --auth-mode login \
-            -o tsv 2>/dev/null || echo "{}")
+            --auth-mode key \
+            --file /tmp/verdict.json \
+            --no-progress 2>/dev/null
 
-          VERDICT=$(echo "$VERDICT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('verdict','unknown'))" 2>/dev/null || echo "unknown")
+          VERDICT=$(python3 -c "import json; print(json.load(open('/tmp/verdict.json')).get('verdict','unknown'))" 2>/dev/null || echo "unknown")
 
           echo "Verdict: $VERDICT"
           echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
