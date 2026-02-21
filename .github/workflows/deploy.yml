@@ -97,11 +97,6 @@ jobs:
             --location southcentralus \
             --tags project=openclaw-secure environment=dev
 
-      - name: Register required resource providers
-        run: |
-          az provider register --namespace Microsoft.Storage --wait
-          az provider register --namespace Microsoft.Authorization --wait
-
       - name: Deploy infrastructure (Bicep)
         run: |
           az deployment group create \
