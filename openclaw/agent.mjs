@@ -61,7 +61,8 @@ function proxiedFetch(url, options = {}) {
 async function loadMemory() {
   try {
     log("info", "Loading approved memory from proxy...");
-    const res = await proxiedFetch(`${MEMORY_URL}/latest`);
+    // Direct fetch — memory endpoint is ON the proxy, not through it
+    const res = await fetch(`${MEMORY_URL}/latest`);
     if (!res.ok) {
       log("warn", "Memory load returned non-OK", { status: res.status });
       return;
@@ -145,7 +146,8 @@ async function saveMemory() {
       stats: payload.stats,
     });
 
-    const res = await proxiedFetch(MEMORY_URL, {
+    // Direct fetch — memory endpoint is ON the proxy, not through it
+    const res = await fetch(MEMORY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

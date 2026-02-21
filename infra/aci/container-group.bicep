@@ -187,11 +187,15 @@ resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@202
           environmentVariables: [
             {
               name: 'HTTP_PROXY'
-              value: 'http://10.0.2.4:3128'
+              value: 'http://${proxyContainerGroup.properties.ipAddress.ip}:3128'
             }
             {
               name: 'HTTPS_PROXY'
-              value: 'http://10.0.2.4:3128'
+              value: 'http://${proxyContainerGroup.properties.ipAddress.ip}:3128'
+            }
+            {
+              name: 'MEMORY_URL'
+              value: 'http://${proxyContainerGroup.properties.ipAddress.ip}:3128/memory'
             }
             {
               name: 'NO_PROXY'
