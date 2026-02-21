@@ -55,15 +55,15 @@ agent_fetch() {
 
   if [[ -n "$proxy" ]]; then
     # Use undici ProxyAgent (installed in agent container)
-    node_script="const{ProxyAgent}=require('undici');const d=new ProxyAgent('${proxy}');fetch('${url}',{dispatcher:d,signal:AbortSignal.timeout(10000)}).then(r=>console.log(r.status)).catch(e=>console.log('ERROR:'+e.message))"
+    node_script="var P=require('undici').ProxyAgent;var d=new P('${proxy}');fetch('${url}',{dispatcher:d,signal:AbortSignal.timeout(10000)}).then(function(r){console.log(r.status)}).catch(function(e){console.log('ERROR:'+e.message)})"
   else
-    node_script="fetch('${url}',{signal:AbortSignal.timeout(5000)}).then(r=>console.log(r.status)).catch(e=>console.log('ERROR:'+e.message))"
+    node_script="fetch('${url}',{signal:AbortSignal.timeout(5000)}).then(function(r){console.log(r.status)}).catch(function(e){console.log('ERROR:'+e.message)})"
   fi
 
   az container exec \
     --resource-group "$RESOURCE_GROUP" \
     --name "$AGENT_CONTAINER" \
-    --exec-command "node -e \"${node_script}\"" 2>&1 || echo "EXEC_ERROR"
+    --exec-command "node -e ${node_script}" 2>&1 || echo "EXEC_ERROR"
 }
 
 # --------------------------------------------------------------------------
