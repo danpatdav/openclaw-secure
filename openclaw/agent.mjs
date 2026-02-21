@@ -322,12 +322,9 @@ Output your analysis as structured JSON with keys: summary, topics, flagged_cont
     log("error", "Claude analysis failed", { error: err.message, cycle: cycleNum });
   }
 
-  // Periodic checkpoint
-  if (Date.now() - lastCheckpoint > CHECKPOINT_INTERVAL_MS) {
-    log("info", "Checkpoint: saving memory...");
-    await saveMemory();
-    lastCheckpoint = Date.now();
-  }
+  // Save memory after every cycle (ensures data is always available for analyzer)
+  log("info", "Saving memory after cycle...");
+  await saveMemory();
 }
 
 // --- Sleep Helper ---
