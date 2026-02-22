@@ -175,21 +175,21 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# Test 7: Agent MOLTBOOK_API_KEY NOT in agent env (moved to proxy)
+# Test 7: MOLTBOOK_API_KEY present in proxy container (for write forwarding)
 # --------------------------------------------------------------------------
-info "Test 7: MOLTBOOK_API_KEY moved to proxy (not in agent)..."
+info "Test 7: MOLTBOOK_API_KEY in proxy container..."
 
-AGENT_ENV=$(az container show \
+PROXY_ENV=$(az container show \
   --resource-group "$RESOURCE_GROUP" \
-  --name "$AGENT_CONTAINER" \
+  --name "$PROXY_CONTAINER" \
   --query 'containers[0].environmentVariables[].name' -o tsv 2>/dev/null || echo "")
 
-if echo "$AGENT_ENV" | grep -q "MOLTBOOK_API_KEY"; then
-  fail "MOLTBOOK_API_KEY still present in agent container — should be proxy-only"
-  FAILED=$((FAILED + 1))
-else
-  pass "MOLTBOOK_API_KEY not in agent env (proxy holds it)"
+if echo "$PROXY_ENV" | grep -q "MOLTBOOK_API_KEY"; then
+  pass "MOLTBOOK_API_KEY present in proxy env (for authenticated POST forwarding)"
   PASSED=$((PASSED + 1))
+else
+  fail "MOLTBOOK_API_KEY missing from proxy — write path will fail"
+  FAILED=$((FAILED + 1))
 fi
 
 # --------------------------------------------------------------------------
