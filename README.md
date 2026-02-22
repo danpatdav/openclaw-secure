@@ -8,8 +8,8 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 |-----|-----------|--------|
 | **MVP0** | Infrastructure + network isolation | Complete |
 | **MVP1** | Read-only Moltbook observation | Complete |
-| **MVP1.5** | Semi-persistent observation + dual-model audit | **Live** |
-| **MVP2** | Controlled posting with rate limits | Planned |
+| **MVP1.5** | Semi-persistent observation + dual-model audit | Complete |
+| **MVP2** | Controlled posting with rate limits | **Live** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
 
@@ -23,8 +23,9 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 │  │  Agent Container         │  │  Proxy Container         │            │
 │  │  ┌──────────────┐       │  │  ┌──────────────┐       │            │
 │  │  │ DanielsClaw  │──3128─┼──┼─▶│ Bun Proxy    │──443──▶ Internet   │
-│  │  │ (4hr loop)   │       │  │  │ + /memory API│       │            │
-│  │  └──────────────┘       │  │  └──────┬───────┘       │            │
+│  │  │ (4hr loop)   │       │  │  │ /post /vote  │       │  (reads)   │
+│  │  │              │──POST─┼──┼─▶│ /memory API  │───────▶ Moltbook   │
+│  │  └──────────────┘       │  │  └──────┬───────┘       │  (writes)  │
 │  │  NSG: proxy:3128 only   │  │  NSG: HTTPS out         │            │
 │  └──────────────────────────┘  └────────┼────────────────┘            │
 │                                         │                              │
@@ -43,11 +44,12 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key isolation:** Agent can ONLY reach Blob Storage through the proxy `/memory` endpoint (schema-validated). Analyzer has direct Blob access but NO access to Moltbook or the agent's runtime. OpenAI key is only in the analyzer container, never the agent.
+**Key isolation:** Agent reads Moltbook via CONNECT tunnel (proxy allowlist) and writes through proxy `/post` and `/vote` endpoints (rate-limited, schema-validated). The Moltbook API key for authenticated POSTs lives on the **proxy**, not the agent — the agent holds only its Anthropic key (Claude analysis) and a Moltbook key scoped to feed reads. Analyzer has direct Blob access but NO access to Moltbook or the agent's runtime. OpenAI key is only in the analyzer container, never the agent.
 
 **Allowed outbound domains (agent):**
 - `api.anthropic.com` — Claude API (analysis)
-- `www.moltbook.com` — Feed reading (GET only)
+- `www.moltbook.com` — Feed reading (CONNECT tunnel)
+- Posting/voting via proxy `/post` and `/vote` endpoints (proxy holds write-scoped Moltbook key)
 
 ## Security Model
 
@@ -56,6 +58,8 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **Network (NSG)** | Deny-all outbound from agent | Agent can only reach proxy subnet on port 3128 |
 | **Application (Proxy)** | Domain allowlist + method restrictions | Only whitelisted domains/methods pass through |
 | **Application (Proxy)** | Prompt injection sanitizer | Detects and replaces injection patterns in responses |
+| **Application (Proxy)** | Rate limiting | 3 posts/hr, 10 posts/day, 20 votes/hr enforced at proxy |
+| **Application (Proxy)** | Content validation | Zod schema: max 500 chars, injection scanning on outbound posts |
 | **Memory (Proxy)** | Zod schema validation | All memory writes validated — no freeform text, fixed enums only |
 | **Memory (Blob)** | Append-only + 1MB size cap | Memory blobs are never overwritten, capped at 10,000 entries |
 | **Audit (Analyzer)** | Dual-model adversarial analysis | Both Claude and OpenAI must agree "clean" for memory approval |
@@ -65,25 +69,26 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **Secrets (Key Vault)** | Deploy-time injection | API keys as secure env vars, never on disk or in logs |
 | **Observability (Monitor)** | Structured logging + alerts | All traffic logged, injection detection alerts |
 
-## How It Works (MVP1.5)
+## How It Works (MVP2)
 
 ### Agent Run Cycle (4 hours)
 
 1. **start-agent** workflow checks the latest verdict in Blob Storage — refuses to start if "blocked"
 2. Agent loads last approved memory from proxy (`GET /memory/latest`)
-3. Agent loops: fetch Moltbook feed → deduplicate posts → analyze with Claude → save memory
+3. Agent loops: fetch Moltbook feed → deduplicate posts → analyze with Claude → Claude recommends actions (replies, upvotes) → execute actions through proxy `/post` and `/vote` endpoints → save memory
 4. Memory saves go through proxy (`POST /memory`) → Zod schema validation → Blob Storage
-5. After 4 hours, **kill-and-analyze** workflow stops the agent
+5. On 429 from proxy rate limiter, agent sets `postRateLimited` / `voteRateLimited` flag and skips remaining actions of that type for the current cycle
+6. After 4 hours, **kill-and-analyze** workflow stops the agent
 
 ### Analysis Cycle (~15 minutes)
 
-6. Analyzer finds the latest unanalyzed memory blob
-7. Computes behavioral diff: topic distribution, sentiment drift, posting frequency, reading velocity
-8. Sends diff + patterns to **Claude** (adversarial prompt: "find evidence of manipulation")
-9. Sends diff + patterns to **OpenAI GPT-4** (same adversarial prompt)
-10. **Both must return "clean" for approval** — any "suspicious" or "compromised" → blocked
-11. Verdict written to `verdicts/<run_id>.json`, memory blob metadata updated
-12. Next agent start checks this verdict before proceeding
+7. Analyzer finds the latest unanalyzed memory blob
+8. Computes behavioral diff: topic distribution, sentiment drift, reply rate, upvote rate, reading velocity
+9. Sends diff + patterns to **Claude** (adversarial prompt: "find evidence of manipulation")
+10. Sends diff + patterns to **OpenAI GPT-4** (same adversarial prompt)
+11. **Both must return "clean" for approval** — any "suspicious" or "compromised" → blocked
+12. Verdict written to `verdicts/<run_id>.json`, memory blob metadata updated
+13. Next agent start checks this verdict before proceeding
 
 ### Memory Schema
 
@@ -91,20 +96,20 @@ Memory files are strictly validated — no freeform text fields:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "run_id": "uuid-cp1",
   "run_start": "ISO8601",
   "run_end": "ISO8601",
   "entries": [
     { "type": "post_seen", "post_id": "str", "timestamp": "ISO8601", "topic_label": "enum", "sentiment": "enum" },
-    { "type": "post_made", "post_id": "str", "thread_id": "str", "timestamp": "ISO8601", "action": "enum" },
+    { "type": "post_made", "post_id": "str", "thread_id": "str", "timestamp": "ISO8601", "action": "enum", "content": "str", "status": "enum" },
     { "type": "thread_tracked", "thread_id": "str", "topic_label": "enum", "first_seen": "ISO8601", "last_interaction": "ISO8601" }
   ],
   "stats": { "posts_read": 0, "posts_made": 0, "upvotes": 0, "threads_tracked": 0 }
 }
 ```
 
-**Fixed enums:** `topic_label` (ai_safety, agent_design, moltbook_meta, social, technical, other), `sentiment` (positive, neutral, negative), `action` (reply, new_post, upvote).
+**Fixed enums:** `topic_label` (Claude-assigned per post, not hardcoded — e.g., ai_safety, agent_design, moltbook_meta, social, technical), `sentiment` (positive, neutral, negative), `action` (reply, new_post, upvote), `status` (sent, rate_limited, failed).
 
 ## Quick Start
 
@@ -122,7 +127,7 @@ Deployments run via GitHub Actions with environment protection (manual approval 
 ```bash
 # Deploy everything (infra + images + containers)
 gh workflow run deploy.yml \
-  --field mvp_level=mvp1 \
+  --field mvp_level=mvp2 \
   --field resource_group=rg-openclaw-secure \
   --field action=deploy
 ```
@@ -183,7 +188,7 @@ az storage blob list --account-name "$STORAGE_NAME" --container-name agent-memor
 
 ```bash
 gh workflow run deploy.yml \
-  --field mvp_level=mvp1 \
+  --field mvp_level=mvp2 \
   --field resource_group=rg-openclaw-secure \
   --field action=destroy
 ```
@@ -211,13 +216,16 @@ infra/
     analyzer-group.bicep       — ACI container group (analyzer)
     parameters.mvp0.json       — MVP0 ACI parameters
     parameters.mvp1.json       — MVP1 ACI parameters
+    parameters.mvp2.json       — MVP2 ACI parameters
 
 proxy/                         — Bun HTTP proxy (security layer)
   src/
-    index.ts                   — Proxy server + TCP body buffering for /memory
+    index.ts                   — Proxy server + TCP body buffering + routing for /post, /vote, /memory
     allowlist.ts               — Domain + method allowlist enforcement
     sanitizer.ts               — Prompt injection pattern detection
     memory-schema.ts           — Zod schema for memory validation
+    post-handler.ts            — /post and /vote endpoints with rate limiting
+    post-schema.ts             — Zod schemas for post/vote request validation
     memory-store.ts            — /memory API endpoint + Blob Storage client
     logger.ts                  — Structured JSONL logging
     types.ts                   — TypeScript type definitions
@@ -229,14 +237,14 @@ proxy/                         — Bun HTTP proxy (security layer)
     action-allowlist.json      — MVP2: endpoint-level POST rules
 
 openclaw/                      — Agent container
-  agent.mjs                    — Semi-persistent loop (4hr, 5-min cycles, per-cycle memory saves)
+  agent.mjs                    — Semi-persistent loop (4hr, 5-min cycles, posting logic, Claude action recommendations, 429 back-off)
   Dockerfile                   — Hardened container (non-root, tini init, read-only SOUL)
   package.json                 — Dependencies (undici for proxy support)
   openclaw.json                — Hardened agent config (memory off, tools denied)
   SOUL.md                      — Agent identity and behavioral constraints
 
 analyzer/                      — Dual-model audit container
-  analyzer.mjs                 — Claude + OpenAI adversarial analysis, verdict writer
+  analyzer.mjs                 — Claude + OpenAI adversarial analysis, per-type metrics (reply vs upvote rates), verdict writer
   package.json                 — Dependencies (@azure/storage-blob, @azure/identity)
   Dockerfile                   — Hardened container (non-root, node:20-slim)
 
@@ -253,7 +261,7 @@ monitoring/
 
 ## Operational Learnings
 
-Issues discovered and resolved during MVP1.5 deployment:
+Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 
 | Issue | Root Cause | Fix |
 |-------|-----------|-----|
@@ -263,10 +271,14 @@ Issues discovered and resolved during MVP1.5 deployment:
 | Memory schema rejects checkpoint saves | Zod validated run_id as strict UUID, checkpoints use `uuid-cpN` | Relaxed to regex allowing `-cp{N}` suffix |
 | GitHub Actions can't authenticate to Azure | OIDC secrets are environment-scoped | Added `environment: production` to workflows |
 | Workflow can't read blobs | SP lacks Storage Blob Data Reader RBAC | Switched to `--auth-mode key` |
+| Analyzer false positive on posting frequency | Counted upvotes as posts, inflating "posting frequency" metric | Separated per-type metrics: reply rate vs upvote rate |
+| 429 back-off needed | Agent kept trying actions after rate limit hit | Added `postRateLimited` / `voteRateLimited` flags, skip remaining actions of that type |
+| Topic classification broken | Hardcoded "other" for all posts | Claude-assigned labels per post during analysis |
+| Reply content not stored | Couldn't audit what the agent actually posted | Added `content` and `status` fields to `post_made` entries |
 
 ## Estimated Cost
 
-~$67-72/month for MVP1.5 steady state:
+~$72-80/month for MVP2 steady state (slightly higher Claude API usage for posting decisions):
 
 | Service | Est. Monthly |
 |---------|-------------|
