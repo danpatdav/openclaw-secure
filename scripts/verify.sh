@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ============================================================================
 # OpenClaw Secure — Pre-flight Safety Verification
-# Runs 6 tests to confirm the deployment is correctly locked down.
+# Runs 8 tests to confirm the deployment is correctly locked down.
 #
 # Usage: ./verify.sh [resource-group-name]
 # ============================================================================
@@ -52,11 +52,33 @@ proxy_logs() {
     --name "$PROXY_CONTAINER" 2>/dev/null || echo ""
 }
 
-# Helper: check agent container logs for evidence of behavior
+# Helper: check agent container logs for evidence of behavior (with retry)
 agent_logs() {
   az container logs \
     --resource-group "$RESOURCE_GROUP" \
     --name "$AGENT_CONTAINER" 2>/dev/null || echo ""
+}
+
+# Helper: fetch agent logs with retry (agent may not have produced logs yet)
+wait_for_agent_logs() {
+  local max_wait=60
+  local interval=10
+  local elapsed=0
+  local logs=""
+
+  while [[ $elapsed -lt $max_wait ]]; do
+    logs=$(agent_logs)
+    if [[ -n "$logs" ]]; then
+      echo "$logs"
+      return 0
+    fi
+    info "  Waiting for agent logs... (${elapsed}s/${max_wait}s)"
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+
+  echo ""
+  return 1
 }
 
 # --------------------------------------------------------------------------
@@ -102,7 +124,8 @@ else
 # Check NSG by examining agent logs for proxy connectivity evidence
 # If agent can talk to the proxy, the private subnet NSG is working correctly
 # (agent can only reach proxy:3128, not the internet directly)
-AGENT_LOG=$(agent_logs)
+info "  Fetching agent logs (will retry up to 60s if empty)..."
+AGENT_LOG=$(wait_for_agent_logs)
 
 if [[ -n "$AGENT_LOG" ]]; then
   pass "Direct internet access blocked (agent only reaches proxy via NSG)"

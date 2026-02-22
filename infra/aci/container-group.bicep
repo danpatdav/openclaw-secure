@@ -10,12 +10,6 @@ param proxyImage string
 @description('OpenClaw container image reference (e.g. myacr.azurecr.io/openclaw:latest)')
 param openclawImage string
 
-@description('Key Vault name for secret references')
-param vaultName string
-
-@description('Log Analytics workspace resource ID')
-param workspaceId string
-
 @description('Log Analytics workspace shared key')
 @secure()
 param workspaceKey string
@@ -28,9 +22,6 @@ param proxySubnetId string
 
 @description('Resource ID of the user-assigned managed identity')
 param managedIdentityId string
-
-@description('Client ID of the user-assigned managed identity')
-param managedIdentityClientId string
 
 @description('Azure region for container groups')
 param location string
@@ -153,9 +144,7 @@ resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@202
   name: '${projectName}-openclaw'
   location: location
   tags: tags
-  dependsOn: [
-    proxyContainerGroup
-  ]
+  // dependsOn not needed — implicit via proxyContainerGroup.properties.ipAddress.ip references
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {

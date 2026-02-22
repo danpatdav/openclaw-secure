@@ -130,13 +130,10 @@ jobs:
               acrName="${{ steps.infra.outputs.acr_name }}" \
               proxyImage="${{ steps.infra.outputs.acr_login }}/openclaw-proxy:mvp2" \
               openclawImage="${{ steps.infra.outputs.acr_login }}/openclaw-agent:mvp2" \
-              vaultName="${{ steps.infra.outputs.vault_name }}" \
-              workspaceId="${{ steps.infra.outputs.workspace_id }}" \
               workspaceKey="$WORKSPACE_KEY" \
               privateSubnetId="${{ steps.infra.outputs.private_subnet }}" \
               proxySubnetId="${{ steps.infra.outputs.proxy_subnet }}" \
               managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
-              managedIdentityClientId="${{ steps.infra.outputs.identity_client }}" \
               anthropicApiKey="$ANTHROPIC_KEY" \
               moltbookApiKey="$MOLTBOOK_KEY" \
               storageAccountName="${{ steps.infra.outputs.storage_name }}" \

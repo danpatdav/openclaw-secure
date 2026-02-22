@@ -7,12 +7,6 @@ param acrName string
 @description('Analyzer container image reference (e.g. myacr.azurecr.io/analyzer:latest)')
 param analyzerImage string
 
-@description('Key Vault name for secret references')
-param vaultName string
-
-@description('Log Analytics workspace resource ID')
-param workspaceId string
-
 @description('Log Analytics workspace shared key')
 @secure()
 param workspaceKey string
@@ -22,9 +16,6 @@ param analyzerSubnetId string
 
 @description('Resource ID of the user-assigned managed identity')
 param managedIdentityId string
-
-@description('Client ID of the user-assigned managed identity')
-param managedIdentityClientId string
 
 @description('Anthropic API key (injected from Key Vault at deploy time)')
 @secure()

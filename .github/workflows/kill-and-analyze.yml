@@ -97,12 +97,9 @@ jobs:
               acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
               acrName="${{ steps.infra.outputs.acr_name }}" \
               analyzerImage="${{ steps.infra.outputs.acr_login }}/openclaw-analyzer:latest" \
-              vaultName="${{ steps.infra.outputs.vault_name }}" \
-              workspaceId="${{ steps.infra.outputs.workspace_id }}" \
               workspaceKey="$WORKSPACE_KEY" \
               analyzerSubnetId="${{ steps.infra.outputs.analyzer_subnet }}" \
               managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
-              managedIdentityClientId="${{ steps.infra.outputs.identity_client }}" \
               anthropicApiKey="$ANTHROPIC_KEY" \
               openaiApiKey="$OPENAI_KEY" \
               storageAccountName="${{ steps.infra.outputs.storage_name }}" \
