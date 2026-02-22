@@ -124,12 +124,12 @@ jobs:
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --template-file infra/aci/container-group.bicep \
-            --parameters infra/aci/parameters.mvp1.json \
+            --parameters infra/aci/parameters.mvp2.json \
             --parameters \
               acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
               acrName="${{ steps.infra.outputs.acr_name }}" \
-              proxyImage="${{ steps.infra.outputs.acr_login }}/openclaw-proxy:mvp1" \
-              openclawImage="${{ steps.infra.outputs.acr_login }}/openclaw-agent:mvp1" \
+              proxyImage="${{ steps.infra.outputs.acr_login }}/openclaw-proxy:mvp2" \
+              openclawImage="${{ steps.infra.outputs.acr_login }}/openclaw-agent:mvp2" \
               vaultName="${{ steps.infra.outputs.vault_name }}" \
               workspaceId="${{ steps.infra.outputs.workspace_id }}" \
               workspaceKey="$WORKSPACE_KEY" \

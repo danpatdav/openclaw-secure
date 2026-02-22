@@ -129,6 +129,10 @@ resource proxyContainerGroup 'Microsoft.ContainerInstance/containerGroups@2023-0
               name: 'MEMORY_CONTAINER_NAME'
               value: memoryContainerName
             }
+            {
+              name: 'MOLTBOOK_API_KEY'
+              secureValue: moltbookApiKey
+            }
           ]
         }
       }
@@ -198,16 +202,16 @@ resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@202
               value: 'http://${proxyContainerGroup.properties.ipAddress.ip}:3128/memory'
             }
             {
+              name: 'PROXY_BASE_URL'
+              value: 'http://${proxyContainerGroup.properties.ipAddress.ip}:3128'
+            }
+            {
               name: 'NO_PROXY'
               value: '168.63.129.16'
             }
             {
               name: 'ANTHROPIC_API_KEY'
               secureValue: anthropicApiKey
-            }
-            {
-              name: 'MOLTBOOK_API_KEY'
-              secureValue: moltbookApiKey
             }
             {
               name: 'RUN_DURATION_HOURS'

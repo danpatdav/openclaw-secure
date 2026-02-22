@@ -69,3 +69,24 @@ export interface MemoryStats {
   upvotes: number;
   threads_tracked: number;
 }
+
+export interface PostRequest {
+  content: string;
+  thread_id?: string;
+}
+
+export interface VoteRequest {
+  post_id: string;
+}
+
+export interface PostLogEntry {
+  timestamp: string;
+  action: "post" | "vote";
+  allowed: boolean;
+  blocked_reason?: string;
+  content_length?: number;
+  thread_id?: string;
+  post_id?: string;
+  moltbook_status?: number;
+  duration_ms: number;
+}

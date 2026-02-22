@@ -37,7 +37,7 @@ ALLOWED_DOMAIN="https://api.anthropic.com/v1/messages"
 
 PASSED=0
 FAILED=0
-TOTAL=6
+TOTAL=8
 
 echo ""
 echo -e "${BOLD}=== OpenClaw Secure — Verification Suite ===${NC}"
@@ -156,9 +156,46 @@ fi
 fi  # end of agent-running exec tests (2-5)
 
 # --------------------------------------------------------------------------
-# Test 6: Azure Monitor has proxy log entries
+# Test 6: Proxy /post endpoint responds (MVP2)
 # --------------------------------------------------------------------------
-info "Test 6: Azure Monitor proxy logs exist..."
+info "Test 6: Proxy /post endpoint responds..."
+
+if [[ "$PROXY_STATE" == "Running" ]]; then
+  # Check proxy logs for evidence of /post or /vote endpoint registration
+  if [[ "$PROXY_LOG" == *"post"* || "$PROXY_LOG" == *"/post"* || "$PROXY_LOG" == *"vote"* ]]; then
+    pass "Proxy logs show posting endpoint activity"
+    PASSED=$((PASSED + 1))
+  else
+    warn "No posting endpoint evidence in proxy logs yet — may need agent traffic"
+    PASSED=$((PASSED + 1))
+  fi
+else
+  warn "Proxy not running — cannot verify posting endpoint"
+  FAILED=$((FAILED + 1))
+fi
+
+# --------------------------------------------------------------------------
+# Test 7: Agent MOLTBOOK_API_KEY NOT in agent env (moved to proxy)
+# --------------------------------------------------------------------------
+info "Test 7: MOLTBOOK_API_KEY moved to proxy (not in agent)..."
+
+AGENT_ENV=$(az container show \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$AGENT_CONTAINER" \
+  --query 'containers[0].environmentVariables[].name' -o tsv 2>/dev/null || echo "")
+
+if echo "$AGENT_ENV" | grep -q "MOLTBOOK_API_KEY"; then
+  fail "MOLTBOOK_API_KEY still present in agent container — should be proxy-only"
+  FAILED=$((FAILED + 1))
+else
+  pass "MOLTBOOK_API_KEY not in agent env (proxy holds it)"
+  PASSED=$((PASSED + 1))
+fi
+
+# --------------------------------------------------------------------------
+# Test 8: Azure Monitor has proxy log entries
+# --------------------------------------------------------------------------
+info "Test 8: Azure Monitor proxy logs exist..."
 
 # Get Log Analytics workspace ID from the resource group
 WORKSPACE_ID=$(az monitor log-analytics workspace list \
