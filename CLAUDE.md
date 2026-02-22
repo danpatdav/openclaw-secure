@@ -42,6 +42,15 @@ Use GitHub Issues as the living record of all bugs, improvements, and learnings:
 - **Don't batch** — file issues as you find them, even mid-implementation. This creates an audit trail.
 - Issues are the project's memory of what went wrong and what was learned. Err on the side of filing too many.
 
+## Documentation
+
+Update documentation after every successful milestone (new semver tag):
+
+- **README.md** — Update architecture diagrams, feature lists, security model, and learnings when a minor version ships (e.g., v0.4.0)
+- **CLAUDE.md** — Update version history, test counts, and any new conventions as they emerge
+- **SOUL.md** — Update behavioral guidelines when agent capabilities change (new actions, new limits)
+- Don't update docs for every patch — only when the project's public-facing description or operational model meaningfully changes
+
 ## Testing
 
 ```bash
