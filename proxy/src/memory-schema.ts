@@ -3,8 +3,8 @@ import { z } from "zod";
 // ID validation: alphanumeric + underscore/hyphen, max 128 chars
 const idField = z.string().regex(/^[a-zA-Z0-9_-]+$/).max(128);
 
-// UUID field for run_id
-const uuidField = z.string().uuid();
+// Run ID field: UUID or UUID-cpN for checkpoint saves
+const runIdField = z.string().regex(/^[a-f0-9-]+(-(cp|checkpoint)\d+)?$/).max(128);
 
 // ISO8601 timestamp
 const timestampField = z.string().datetime();
@@ -54,7 +54,7 @@ const statsSchema = z.object({
 
 export const memoryFileSchema = z.object({
   version: z.literal(1),
-  run_id: uuidField,
+  run_id: runIdField,
   run_start: timestampField,
   run_end: timestampField,
   entries: z.array(memoryEntry).max(10000),
