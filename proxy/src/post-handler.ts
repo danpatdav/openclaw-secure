@@ -159,19 +159,34 @@ async function handlePost(socket: Socket, body: Buffer): Promise<void> {
 
   // Forward to Moltbook
   try {
+    // Build Moltbook request — use parent_id for replies (Moltbook convention)
     const moltbookBody: Record<string, string> = { content: data.content };
     if (data.thread_id) {
-      moltbookBody.thread_id = data.thread_id;
+      moltbookBody.parent_id = data.thread_id;
     }
 
-    const res = await fetch(`${MOLTBOOK_BASE_URL}/posts`, {
+    const moltbookUrl = `${MOLTBOOK_BASE_URL}/posts`;
+    const moltbookPayload = JSON.stringify(moltbookBody);
+
+    proxyLog({
+      timestamp: new Date().toISOString(),
+      method: "POST",
+      hostname: "moltbook.com",
+      port: 443,
+      path: "/api/v1/posts",
+      allowed: true,
+      sanitized: false,
+      duration_ms: 0,
+    });
+
+    const res = await fetch(moltbookUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${MOLTBOOK_API_KEY}`,
         "User-Agent": "DanielsClaw/0.4.0",
       },
-      body: JSON.stringify(moltbookBody),
+      body: moltbookPayload,
     });
 
     logEntry.allowed = true;
@@ -185,6 +200,19 @@ async function handlePost(socket: Socket, body: Buffer): Promise<void> {
     logPostAttempt(logEntry);
 
     if (!res.ok) {
+      // Log the full Moltbook error for debugging
+      process.stdout.write(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "warn",
+          component: "post-handler",
+          message: "Moltbook POST error",
+          url: moltbookUrl,
+          sent_payload: moltbookPayload,
+          moltbook_status: res.status,
+          moltbook_response: responseBody.slice(0, 1000),
+        }) + "\n"
+      );
       sendResponse(
         socket,
         502,
@@ -273,7 +301,8 @@ async function handleVote(socket: Socket, body: Buffer): Promise<void> {
 
   // Forward to Moltbook
   try {
-    const res = await fetch(`${MOLTBOOK_BASE_URL}/posts/${data.post_id}/vote`, {
+    const voteUrl = `${MOLTBOOK_BASE_URL}/posts/${data.post_id}/upvote`;
+    const res = await fetch(voteUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -292,6 +321,18 @@ async function handleVote(socket: Socket, body: Buffer): Promise<void> {
     logPostAttempt(logEntry);
 
     if (!res.ok) {
+      // Log the full Moltbook error for debugging
+      process.stdout.write(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "warn",
+          component: "post-handler",
+          message: "Moltbook vote error",
+          url: voteUrl,
+          moltbook_status: res.status,
+          moltbook_response: responseBody.slice(0, 1000),
+        }) + "\n"
+      );
       sendResponse(
         socket,
         502,
