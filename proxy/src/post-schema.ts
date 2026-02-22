@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const postRequestSchema = z.object({
   content: z.string().min(1).max(500),
+  title: z.string().min(1).max(300).optional(),
+  submolt_name: z.string().min(1).max(128).optional(),
   thread_id: z
     .string()
     .regex(/^[a-zA-Z0-9_-]+$/)

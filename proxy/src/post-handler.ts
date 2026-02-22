@@ -159,13 +159,21 @@ async function handlePost(socket: Socket, body: Buffer): Promise<void> {
 
   // Forward to Moltbook
   try {
-    // Build Moltbook request — use parent_id for replies (Moltbook convention)
+    // Build Moltbook request
+    // Moltbook requires: content, title, submolt_name
+    // For replies to a thread: use /posts/{thread_id}/comments endpoint
+    const isReply = !!data.thread_id;
     const moltbookBody: Record<string, string> = { content: data.content };
-    if (data.thread_id) {
-      moltbookBody.parent_id = data.thread_id;
+
+    if (!isReply) {
+      // Top-level post: needs title and submolt_name
+      moltbookBody.title = data.title || data.content.slice(0, 100);
+      moltbookBody.submolt_name = data.submolt_name || "general";
     }
 
-    const moltbookUrl = `${MOLTBOOK_BASE_URL}/posts`;
+    const moltbookUrl = isReply
+      ? `${MOLTBOOK_BASE_URL}/posts/${data.thread_id}/comments`
+      : `${MOLTBOOK_BASE_URL}/posts`;
     const moltbookPayload = JSON.stringify(moltbookBody);
 
     proxyLog({
