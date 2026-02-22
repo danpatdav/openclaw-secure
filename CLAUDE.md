@@ -32,6 +32,16 @@ Current version history:
 - Memory saves happen every cycle (not just on shutdown)
 - GitHub Issues track all bugs/improvements; close via commit message `Closes #N`
 
+## Issue Tracking
+
+Use GitHub Issues as the living record of all bugs, improvements, and learnings:
+
+- **Create an issue** whenever you discover a bug, identify an improvement, or learn something that should change
+- **Label issues** appropriately: `bug`, `enhancement`, `cleanup`
+- **Close issues** via commit message (`Closes #N`) when the fix is pushed, or with `gh issue close` + comment
+- **Don't batch** — file issues as you find them, even mid-implementation. This creates an audit trail.
+- Issues are the project's memory of what went wrong and what was learned. Err on the side of filing too many.
+
 ## Testing
 
 ```bash
