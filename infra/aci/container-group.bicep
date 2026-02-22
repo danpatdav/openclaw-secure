@@ -214,6 +214,10 @@ resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@202
               secureValue: anthropicApiKey
             }
             {
+              name: 'MOLTBOOK_API_KEY'
+              secureValue: moltbookApiKey
+            }
+            {
               name: 'RUN_DURATION_HOURS'
               value: '4'
             }
