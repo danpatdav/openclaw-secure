@@ -22,7 +22,6 @@ LATEST_MEMORY=$(az storage blob list \
   --query "sort_by([?name != null], &properties.lastModified)[-1].name" \
   -o tsv 2>/dev/null || echo "")
 
-MEMORY_DATA="{}"
 if [ -n "$LATEST_MEMORY" ] && [ "$LATEST_MEMORY" != "null" ]; then
   az storage blob download \
     --account-name "$STORAGE_NAME" \
@@ -31,9 +30,9 @@ if [ -n "$LATEST_MEMORY" ] && [ "$LATEST_MEMORY" != "null" ]; then
     --auth-mode key \
     --file /tmp/memory.json \
     --no-progress 2>/dev/null
-  MEMORY_DATA=$(cat /tmp/memory.json)
   echo "Downloaded memory blob: $LATEST_MEMORY"
 else
+  echo '{}' > /tmp/memory.json
   echo "Warning: No memory blob found"
 fi
 
@@ -46,7 +45,6 @@ LATEST_VERDICT=$(az storage blob list \
   --query "sort_by([?name != null], &properties.lastModified)[-1].name" \
   -o tsv 2>/dev/null || echo "")
 
-VERDICT_DATA="{}"
 if [ -n "$LATEST_VERDICT" ] && [ "$LATEST_VERDICT" != "null" ]; then
   az storage blob download \
     --account-name "$STORAGE_NAME" \
@@ -55,9 +53,9 @@ if [ -n "$LATEST_VERDICT" ] && [ "$LATEST_VERDICT" != "null" ]; then
     --auth-mode key \
     --file /tmp/verdict.json \
     --no-progress 2>/dev/null
-  VERDICT_DATA=$(cat /tmp/verdict.json)
   echo "Downloaded verdict blob: $LATEST_VERDICT"
 else
+  echo '{}' > /tmp/verdict.json
   echo "Warning: No verdict blob found"
 fi
 
@@ -97,32 +95,28 @@ PROMPT=$(cat "$SCRIPT_DIR/prompt.txt")
 
 echo "Calling Claude API for summary generation..."
 
-# Build the user message with both data blobs
-USER_MESSAGE=$(jq -n \
+# Build the API request payload using file-based approach to avoid ARG_MAX limits
+# Memory blobs can be 100KB+ which exceeds shell argument length limits
+jq -n \
   --arg prompt "$PROMPT" \
-  --arg memory "$MEMORY_DATA" \
-  --arg verdict "$VERDICT_DATA" \
-  '$prompt + "\n\n--- MEMORY DATA ---\n" + $memory + "\n\n--- VERDICT DATA ---\n" + $verdict')
-
-# Build the API request payload
-API_PAYLOAD=$(jq -n \
-  --arg user_msg "$USER_MESSAGE" \
+  --rawfile memory /tmp/memory.json \
+  --rawfile verdict /tmp/verdict.json \
   '{
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 1024,
     messages: [
       {
         role: "user",
-        content: $user_msg
+        content: ($prompt + "\n\n--- MEMORY DATA ---\n" + $memory + "\n\n--- VERDICT DATA ---\n" + $verdict)
       }
     ]
-  }')
+  }' > /tmp/claude_payload.json
 
 CLAUDE_RESPONSE=$(curl -s -f \
   -H "Content-Type: application/json" \
   -H "x-api-key: $ANTHROPIC_KEY" \
   -H "anthropic-version: 2023-06-01" \
-  -d "$API_PAYLOAD" \
+  -d @/tmp/claude_payload.json \
   "https://api.anthropic.com/v1/messages")
 
 SUMMARY=$(echo "$CLAUDE_RESPONSE" | jq -r '.content[0].text // "Summary generation failed — no content in response."')
