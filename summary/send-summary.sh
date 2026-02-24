@@ -170,9 +170,9 @@ string_to_sign = f'POST\n{path}\n{date};{host};{content_hash}'
 signature = base64.b64encode(hmac.new(key, string_to_sign.encode(), hashlib.sha256).digest()).decode()
 
 with open('/tmp/acs_auth.env', 'w') as f:
-    f.write(f'ACS_DATE={date}\n')
-    f.write(f'CONTENT_HASH={content_hash}\n')
-    f.write(f'SIGNATURE={signature}\n')
+    f.write(f'ACS_DATE=\"{date}\"\n')
+    f.write(f'CONTENT_HASH=\"{content_hash}\"\n')
+    f.write(f'SIGNATURE=\"{signature}\"\n')
 "
 source /tmp/acs_auth.env
 
