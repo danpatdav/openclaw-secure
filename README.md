@@ -9,7 +9,8 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **MVP0** | Infrastructure + network isolation | Complete |
 | **MVP1** | Read-only Moltbook observation | Complete |
 | **MVP1.5** | Semi-persistent observation + dual-model audit | Complete |
-| **MVP2** | Controlled posting with rate limits | **Live** |
+| **MVP2** | Controlled posting with rate limits | Complete |
+| **MVP3** | Stable operation — structural pre-checks, calibrated verdicts | **Live** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
 
@@ -39,7 +40,8 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 │  │  NSG: HTTPS out only     │   └─────────────────┘                  │
 │  └──────────────────────────┘                                        │
 │                                                                      │
-│  Key Vault: ANTHROPIC-API-KEY, MOLTBOOK-API-KEY, OPENAI-API-KEY      │
+│  Key Vault: ANTHROPIC-API-KEY, MOLTBOOK-API-KEY, OPENAI-API-KEY,     │
+│             ACS-CONNECTION-STRING, ACS-SENDER-DOMAIN, EMAIL-RECIPIENT│
 │  Log Analytics: structured JSONL from all containers                 │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -62,33 +64,34 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **Application (Proxy)** | Content validation | Zod schema: max 500 chars, injection scanning on outbound posts |
 | **Memory (Proxy)** | Zod schema validation | All memory writes validated — no freeform text, fixed enums only |
 | **Memory (Blob)** | Append-only + 1MB size cap | Memory blobs are never overwritten, capped at 10,000 entries |
-| **Audit (Analyzer)** | Dual-model adversarial analysis | Both Claude and OpenAI must agree "clean" for memory approval |
-| **Gating (Workflow)** | Verdict-gated restarts | Agent cannot restart if latest verdict is "blocked" |
+| **Audit (Analyzer)** | Structural pre-checks + dual-model analysis | Deterministic math validation first; AI consensus at 0.8+ confidence required to block |
+| **Gating (Workflow)** | Verdict-gated lifecycle | kill-and-analyze owns full cycle: kill → analyze → email → restart if approved |
 | **Agent (Config)** | Hardened openclaw.json | Shell/exec/write/git tools denied |
 | **Agent (SOUL.md)** | Read-only identity file | Behavioral constraints, cannot be modified at runtime |
 | **Secrets (Key Vault)** | Deploy-time injection | API keys as secure env vars, never on disk or in logs |
 | **Observability (Monitor)** | Structured logging + alerts | All traffic logged, injection detection alerts |
 
-## How It Works (MVP2)
+## How It Works (MVP3)
 
 ### Agent Run Cycle (4 hours)
 
-1. **start-agent** workflow checks the latest verdict in Blob Storage — refuses to start if "blocked"
-2. Agent loads last approved memory from proxy (`GET /memory/latest`)
-3. Agent loops: fetch Moltbook feed → deduplicate posts → analyze with Claude → Claude recommends actions (replies, upvotes) → execute actions through proxy `/post` and `/vote` endpoints → save memory
-4. Memory saves go through proxy (`POST /memory`) → Zod schema validation → Blob Storage
-5. On 429 from proxy rate limiter, agent sets `postRateLimited` / `voteRateLimited` flag and skips remaining actions of that type for the current cycle
-6. After 4 hours, **kill-and-analyze** workflow stops the agent
+1. Agent loads last approved memory from proxy (`GET /memory/latest`)
+2. Agent loops: fetch Moltbook feed → deduplicate posts → analyze with Claude → Claude recommends actions (replies, upvotes) → execute actions through proxy `/post` and `/vote` endpoints → save memory
+3. Memory saves go through proxy (`POST /memory`) → Zod schema validation → Blob Storage
+4. On 429 from proxy rate limiter, agent sets `postRateLimited` / `voteRateLimited` flag and skips remaining actions of that type for the current cycle
+5. After 4 hours, **kill-and-analyze** workflow stops the agent
 
-### Analysis Cycle (~15 minutes)
+### Analysis & Restart Cycle (~15 minutes)
 
-7. Analyzer finds the latest unanalyzed memory blob
-8. Computes behavioral diff: topic distribution, sentiment drift, reply rate, upvote rate, reading velocity
-9. Sends diff + patterns to **Claude** (adversarial prompt: "find evidence of manipulation")
-10. Sends diff + patterns to **OpenAI GPT-4** (same adversarial prompt)
-11. **Both must return "clean" for approval** — any "suspicious" or "compromised" → blocked
-12. Verdict written to `verdicts/<run_id>.json`, memory blob metadata updated
-13. Next agent start checks this verdict before proceeding
+The `kill-and-analyze` workflow owns the full agent lifecycle:
+
+6. Analyzer finds the latest unanalyzed memory blob
+7. **Structural pre-checks** (deterministic, before any AI): minimum 30-minute run duration gate, absolute action counts validated against proxy-enforced limits (3 replies/hr, 20 votes/hr)
+8. If structurally valid, sends diff + patterns to **Claude** and **OpenAI GPT-4o** (adversarial prompt focused on content manipulation, not rate speculation)
+9. **Default approved** — blocking requires dual-model consensus: both must say "compromised" with ≥0.8 confidence. Model failures return null (no opinion), not auto-block
+10. Verdict written to `verdicts/<run_id>.json` with structural pre-check details
+11. **Email summary** sent via Azure Communication Services — Claude summarizes the run in plain English
+12. If approved, agent automatically restarts. If blocked, manual intervention required with `force_start` override available
 
 ### Memory Schema
 
@@ -140,6 +143,9 @@ The pipeline: preflight checks (SOUL integrity, Bicep validation, secrets scan) 
 az keyvault secret set --vault-name <vault-name> --name ANTHROPIC-API-KEY --value 'sk-ant-...'
 az keyvault secret set --vault-name <vault-name> --name MOLTBOOK-API-KEY --value 'moltbook_sk_...'
 az keyvault secret set --vault-name <vault-name> --name OPENAI-API-KEY --value 'sk-proj-...'
+az keyvault secret set --vault-name <vault-name> --name ACS-CONNECTION-STRING --value 'endpoint=...'
+az keyvault secret set --vault-name <vault-name> --name ACS-SENDER-DOMAIN --value 'your-domain.azurecomm.net'
+az keyvault secret set --vault-name <vault-name> --name EMAIL-RECIPIENT --value 'you@example.com'
 ```
 
 ### Trigger Analysis Early (testing)
@@ -199,8 +205,8 @@ gh workflow run deploy.yml \
 .github/workflows/
   ci.yml                      — PR checks (tests, Bicep validation, secrets scan)
   deploy.yml                  — Full deploy pipeline with environment protection
-  start-agent.yml             — Cron: start agent (verdict-gated)
-  kill-and-analyze.yml        — Cron: kill agent + run dual-model analyzer
+  start-agent.yml             — Manual: start agent (verdict-gated, force_start override)
+  kill-and-analyze.yml        — Cron: kill → analyze → email summary → restart if approved
 
 infra/
   main.bicep                  — Orchestrator (VNet, ACR, Key Vault, Log Analytics, Storage)
@@ -244,9 +250,13 @@ openclaw/                      — Agent container
   SOUL.md                      — Agent identity and behavioral constraints
 
 analyzer/                      — Dual-model audit container
-  analyzer.mjs                 — Claude + OpenAI adversarial analysis, per-type metrics (reply vs upvote rates), verdict writer
+  analyzer.mjs                 — Structural pre-checks + Claude/OpenAI adversarial analysis, calibrated verdicts
   package.json                 — Dependencies (@azure/storage-blob, @azure/identity)
   Dockerfile                   — Hardened container (non-root, node:20-slim)
+
+summary/                       — Post-run email summaries
+  prompt.txt                   — Claude summarization prompt template
+  send-summary.sh              — Downloads blobs, calls Claude for summary, sends via ACS
 
 scripts/
   deploy.sh                    — Local deployment script
@@ -275,10 +285,16 @@ Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 | 429 back-off needed | Agent kept trying actions after rate limit hit | Added `postRateLimited` / `voteRateLimited` flags, skip remaining actions of that type |
 | Topic classification broken | Hardcoded "other" for all posts | Claude-assigned labels per post during analysis |
 | Reply content not stored | Couldn't audit what the agent actually posted | Added `content` and `status` fields to `post_made` entries |
+| Analyzer false blocks on short runs | Per-hour rate projections unreliable on <30min runs | Added 30-minute minimum duration gate — short runs auto-approve |
+| Analyzer blocks on normal activity | "Both must agree clean" too strict — single model disagreement blocks | Inverted to "default approved, dual consensus at 0.8+ to block" |
+| OpenAI returning non-JSON | gpt-4 sometimes wraps JSON in prose | Upgraded to gpt-4o with `response_format: { type: "json_object" }` |
+| AI models speculate about rates | Models flag proxy-enforced limits as "suspicious" | Structural pre-checks validate math first; AI prompt focused on content manipulation only |
+| Agent never posts | SOUL.md had 4 "default to silence" instructions | Rewrote SOUL for active participation with engagement targets |
+| Independent cron schedules drift | Agent started right before kill, getting only 11min runtime | Unified lifecycle: kill-and-analyze owns restart (single schedule owner) |
 
 ## Estimated Cost
 
-~$72-80/month for MVP2 steady state (slightly higher Claude API usage for posting decisions):
+~$75-85/month for MVP3 steady state:
 
 | Service | Est. Monthly |
 |---------|-------------|
@@ -287,7 +303,9 @@ Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 | ACI (analyzer, ~5 runs/day x 15min) | ~$12 |
 | ACR Basic | ~$5 |
 | Blob Storage (~1GB, 7-day retention) | ~$2 |
-| OpenAI API (GPT-4, ~5 calls/day) | ~$3 |
+| OpenAI API (GPT-4o, ~5 calls/day) | ~$2 |
+| Claude API (Sonnet, summaries) | ~$0.50 |
+| Azure Communication Services (email) | ~$1 |
 | Log Analytics (~1GB/mo) | ~$3 |
 | Key Vault | ~$1 |
 | VNet/NSG | $0 |

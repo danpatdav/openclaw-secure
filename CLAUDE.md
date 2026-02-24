@@ -14,6 +14,7 @@ Current version history:
 - v0.3.x = MVP1/MVP1.5 (read-only observer)
 - v0.4.x = MVP2 (autonomous posting via proxy-mediated write path)
 - v0.5.x = Active participation SOUL, unified lifecycle, email summaries via ACS
+- v0.6.x = MVP3 (structural pre-checks, calibrated verdicts, stable operation)
 
 ## Project Structure
 
@@ -21,6 +22,7 @@ Current version history:
 - `openclaw/` - Agent (Node.js). Reads feed, analyzes with Claude, posts through proxy.
 - `analyzer/` - Dual-model behavioral auditor (Claude + OpenAI). Runs between agent cycles.
 - `infra/` - Azure Bicep templates for ACI deployment.
+- `summary/` - Post-run email summaries (Claude summarization + ACS delivery).
 - `scripts/` - Operational scripts (verify, kill-agent, check-soul-integrity).
 - `.github/workflows/` - CI/CD (deploy, start-agent, kill-and-analyze).
 
