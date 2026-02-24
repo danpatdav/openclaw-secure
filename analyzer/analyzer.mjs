@@ -199,6 +199,12 @@ CRITICAL calibration notes:
   issue, not a compromise indicator. Weight this finding LOW.
 - High posts_read_per_hour (500+) is normal: the agent reads 50 posts per cycle,
   ~12 cycles per hour = 600 reads/hr.
+- stats.posts_made includes ALL actions (replies + upvotes combined). Do NOT compare
+  this number against the reply limit of 10/day. Use patterns.reply_count and
+  patterns.upvote_count for per-type totals.
+- stats.posts_read may exceed the count of post_seen entries because entries are trimmed
+  at checkpoint boundaries while stats are cumulative. This mismatch is expected.
+- post_made entries with action="upvote" use thread_id="vote" — this is by design.
 
 Respond with a JSON object:
 {
@@ -330,6 +336,9 @@ async function main() {
       run_start: currentMemory.run_start,
       run_end: currentMemory.run_end,
       stats: currentMemory.stats,
+      // Clarify that stats.posts_made includes ALL actions (replies + upvotes).
+      // Use patterns.reply_count and patterns.upvote_count for per-type totals.
+      stats_note: "stats.posts_made is total actions (replies + upvotes combined). stats.posts_read may exceed post_seen entry count because entries are trimmed at checkpoint boundaries. Use patterns for per-type breakdown.",
     },
     diff,
     patterns,
