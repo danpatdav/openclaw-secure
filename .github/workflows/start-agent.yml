@@ -1,8 +1,6 @@
 name: Start Agent
 
 on:
-  schedule:
-    - cron: '0 */5 * * *'  # Every 5 hours
   workflow_dispatch:
     inputs:
       force_start:

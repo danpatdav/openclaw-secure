@@ -2,7 +2,7 @@ name: Kill and Analyze
 
 on:
   schedule:
-    - cron: '0 4,9,14,19 * * *'  # 4-hour offset from start
+    - cron: '0 */5 * * *'  # Every 5 hours — owns the full lifecycle
   workflow_dispatch:
 
 permissions:
@@ -56,6 +56,8 @@ jobs:
           IDENTITY_CLIENT=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.managedIdentityClientId.value' -o tsv)
           WORKSPACE_ID=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.workspaceId.value' -o tsv)
           ANALYZER_SUBNET=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.analyzerSubnetId.value' -o tsv)
+          PRIVATE_SUBNET=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.privateSubnetId.value' -o tsv)
+          PROXY_SUBNET=$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.proxySubnetId.value' -o tsv)
 
           echo "storage_name=$STORAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "acr_login=$ACR_LOGIN" >> "$GITHUB_OUTPUT"
@@ -65,6 +67,8 @@ jobs:
           echo "identity_client=$IDENTITY_CLIENT" >> "$GITHUB_OUTPUT"
           echo "workspace_id=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
           echo "analyzer_subnet=$ANALYZER_SUBNET" >> "$GITHUB_OUTPUT"
+          echo "private_subnet=$PRIVATE_SUBNET" >> "$GITHUB_OUTPUT"
+          echo "proxy_subnet=$PROXY_SUBNET" >> "$GITHUB_OUTPUT"
 
       - name: Deploy analyzer container
         run: |
@@ -188,3 +192,56 @@ jobs:
             --name openclaw-analyzer \
             --yes \
             --output none 2>/dev/null || true
+
+      - name: Restart agent
+        if: always() && steps.verdict.outputs.verdict == 'approved'
+        run: |
+          echo "Verdict is approved — restarting agent..."
+
+          WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --workspace-name openclaw-logs \
+            --query primarySharedKey -o tsv)
+
+          DEPLOYER_OID=$(az ad sp show --id "${{ secrets.AZURE_CLIENT_ID }}" --query id -o tsv)
+          az keyvault set-policy \
+            --name "${{ steps.infra.outputs.vault_name }}" \
+            --object-id "$DEPLOYER_OID" \
+            --secret-permissions get \
+            --output none
+
+          ANTHROPIC_KEY=$(az keyvault secret show \
+            --vault-name "${{ steps.infra.outputs.vault_name }}" \
+            --name ANTHROPIC-API-KEY \
+            --query value -o tsv)
+
+          MOLTBOOK_KEY=$(az keyvault secret show \
+            --vault-name "${{ steps.infra.outputs.vault_name }}" \
+            --name MOLTBOOK-API-KEY \
+            --query value -o tsv 2>/dev/null || echo "")
+
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/aci/container-group.bicep \
+            --parameters infra/aci/parameters.mvp2.json \
+            --parameters \
+              acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
+              acrName="${{ steps.infra.outputs.acr_name }}" \
+              proxyImage="${{ steps.infra.outputs.acr_login }}/openclaw-proxy:mvp2" \
+              openclawImage="${{ steps.infra.outputs.acr_login }}/openclaw-agent:mvp2" \
+              workspaceKey="$WORKSPACE_KEY" \
+              privateSubnetId="${{ steps.infra.outputs.private_subnet }}" \
+              proxySubnetId="${{ steps.infra.outputs.proxy_subnet }}" \
+              managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
+              anthropicApiKey="$ANTHROPIC_KEY" \
+              moltbookApiKey="$MOLTBOOK_KEY" \
+              storageAccountName="${{ steps.infra.outputs.storage_name }}" \
+              location=southcentralus
+
+          echo "Agent restarted successfully"
+
+      - name: Agent blocked — not restarting
+        if: always() && steps.verdict.outputs.verdict == 'blocked'
+        run: |
+          echo "::warning::Verdict is BLOCKED — agent will NOT be restarted"
+          echo "Manual intervention required: gh workflow run start-agent.yml -f force_start=true"
