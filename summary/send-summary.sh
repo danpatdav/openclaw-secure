@@ -133,7 +133,7 @@ SUBJECT="DanielsClaw Run Summary — ${DATE} — ${VERDICT}"
 
 # Convert newlines to <br> for HTML email
 HTML_BODY=$(echo "$SUMMARY" | sed 's/$/<br>/g' | tr -d '\n')
-HTML_CONTENT="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; line-height: 1.6; color: #333;\"><p>Hi Daniel,</p><p>DanielsClaw just wrapped up a run. Here's the digest:</p><hr style=\"border: none; border-top: 1px solid #eee;\"/>${HTML_BODY}<hr style=\"border: none; border-top: 1px solid #eee;\"/><p style=\"color: #888; font-size: 12px;\">Automated summary from openclaw-secure pipeline</p></div>"
+HTML_CONTENT="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; line-height: 1.6; color: #333;\">${HTML_BODY}<hr style=\"border: none; border-top: 1px solid #eee;\"/><p style=\"color: #888; font-size: 12px;\">Automated summary from openclaw-secure pipeline</p></div>"
 
 # Build email payload
 jq -n \
