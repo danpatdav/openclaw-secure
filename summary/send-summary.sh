@@ -29,7 +29,8 @@ if [ -n "$LATEST_MEMORY" ] && [ "$LATEST_MEMORY" != "null" ]; then
     --name "$LATEST_MEMORY" \
     --auth-mode key \
     --file /tmp/memory.json \
-    --no-progress 2>/dev/null
+    --no-progress \
+    --output none 2>/dev/null
   echo "Downloaded memory blob: $LATEST_MEMORY"
 else
   echo '{}' > /tmp/memory.json
@@ -52,7 +53,8 @@ if [ -n "$LATEST_VERDICT" ] && [ "$LATEST_VERDICT" != "null" ]; then
     --name "$LATEST_VERDICT" \
     --auth-mode key \
     --file /tmp/verdict.json \
-    --no-progress 2>/dev/null
+    --no-progress \
+    --output none 2>/dev/null
   echo "Downloaded verdict blob: $LATEST_VERDICT"
 else
   echo '{}' > /tmp/verdict.json
