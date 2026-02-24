@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '0 */5 * * *'  # Every 5 hours
   workflow_dispatch:
+    inputs:
+      force_start:
+        description: 'Override blocked verdict and start agent'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -54,6 +60,12 @@ jobs:
       - name: Check latest verdict
         id: verdict
         run: |
+          if [ "${{ inputs.force_start }}" = "true" ]; then
+            echo "::warning::Force start requested — skipping verdict check"
+            echo "approved=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           STORAGE_NAME="${{ steps.infra.outputs.storage_name }}"
           if [ -z "$STORAGE_NAME" ]; then
             echo "No storage account found — skipping verdict check (first run)"
