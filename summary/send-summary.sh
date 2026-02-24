@@ -114,12 +114,22 @@ jq -n \
     ]
   }' > /tmp/claude_payload.json
 
-CLAUDE_RESPONSE=$(curl -s -f \
+CLAUDE_HTTP_STATUS=$(curl -s -o /tmp/claude_response.json -w "%{http_code}" \
   -H "Content-Type: application/json" \
   -H "x-api-key: $ANTHROPIC_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -d @/tmp/claude_payload.json \
   "https://api.anthropic.com/v1/messages")
+
+if [ "$CLAUDE_HTTP_STATUS" -ge 200 ] && [ "$CLAUDE_HTTP_STATUS" -lt 300 ]; then
+  CLAUDE_RESPONSE=$(cat /tmp/claude_response.json)
+else
+  echo "::warning::Claude API returned HTTP $CLAUDE_HTTP_STATUS"
+  cat /tmp/claude_response.json 2>/dev/null || true
+  echo ""
+  echo "Skipping email — summary generation failed"
+  exit 0
+fi
 
 SUMMARY=$(echo "$CLAUDE_RESPONSE" | jq -r '.content[0].text // "Summary generation failed — no content in response."')
 
