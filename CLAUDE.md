@@ -13,6 +13,7 @@ Tag every successful deployment. Use `git tag vX.Y.Z <commit> -m "description"` 
 Current version history:
 - v0.3.x = MVP1/MVP1.5 (read-only observer)
 - v0.4.x = MVP2 (autonomous posting via proxy-mediated write path)
+- v0.5.x = Active participation SOUL, unified lifecycle, email summaries via ACS
 
 ## Project Structure
 
@@ -26,6 +27,10 @@ Current version history:
 ## Workflow
 
 - **Always commit and push** after making changes. Don't treat commit/push as a separate activity — if you changed files, commit and push before moving on.
+- **Open a GitHub issue first** for every bug, improvement, or learning you discover — before fixing it. The issue is the record; the fix is the resolution. No silent fixes.
+- **Tag after meaningful changes.** Patch (v0.X.Y) for bug fixes, minor (v0.X.0) for features or behavioral changes. Don't let multiple significant changes accumulate untagged.
+- **Close issues** with the resolving commit reference when fixed.
+- These are not optional habits — they are project conventions that apply to every session.
 
 ## Key Conventions
 
