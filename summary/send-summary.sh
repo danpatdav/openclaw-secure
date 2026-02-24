@@ -133,38 +133,39 @@ SUBJECT="DanielsClaw Run Summary — ${DATE} — ${VERDICT}"
 HTML_BODY=$(echo "$SUMMARY" | sed 's/$/<br>/g' | tr -d '\n')
 HTML_CONTENT="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; line-height: 1.6; color: #333;\"><p>Hi Daniel,</p><p>DanielsClaw just wrapped up a run. Here's the digest:</p><hr style=\"border: none; border-top: 1px solid #eee;\"/>${HTML_BODY}<hr style=\"border: none; border-top: 1px solid #eee;\"/><p style=\"color: #888; font-size: 12px;\">Automated summary from openclaw-secure pipeline</p></div>"
 
-# ACS Email REST API requires HMAC-SHA256 authentication
-# Build the request date and string-to-sign
-ACS_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S GMT")
-ACS_HOST=$(echo "$ACS_ENDPOINT" | sed 's|https://||' | sed 's|/||')
-API_PATH="/emails:send?api-version=2023-03-31"
-
-EMAIL_PAYLOAD=$(jq -n \
+# Build email payload
+jq -n \
   --arg to "$EMAIL_RECIPIENT" \
   --arg subject "$SUBJECT" \
   --arg html "$HTML_CONTENT" \
+  --arg sender "DoNotReply@$ACS_SENDER_DOMAIN" \
   '{
-    senderAddress: "DoNotReply@'"$ACS_SENDER_DOMAIN"'",
+    senderAddress: $sender,
     recipients: { to: [{ address: $to }] },
     content: {
       subject: $subject,
       html: $html
     }
-  }')
+  }' > /tmp/email_payload.json
 
-# Compute HMAC-SHA256 signature for ACS authentication
-CONTENT_HASH=$(echo -n "$EMAIL_PAYLOAD" | openssl dgst -sha256 -binary | base64)
-STRING_TO_SIGN="POST\n${API_PATH}\n${ACS_DATE};${ACS_HOST};${CONTENT_HASH}"
-SIGNATURE=$(echo -ne "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$(echo "$ACS_ACCESS_KEY" | base64 -d)" -binary | base64)
+# Send via ACS Email REST API using connection string auth
+# Use curl with HMAC-SHA256 - compute signature per ACS spec
+ACS_HOST=$(echo "$ACS_ENDPOINT" | sed 's|https://||' | sed 's|/$||')
+ACS_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S GMT")
+ACS_PATH="/emails:send?api-version=2023-03-31"
+CONTENT_HASH=$(openssl dgst -sha256 -binary /tmp/email_payload.json | base64)
+STRING_TO_SIGN=$(printf "POST\n%s\n%s;%s;%s" "$ACS_PATH" "$ACS_DATE" "$ACS_HOST" "$CONTENT_HASH")
+DECODED_KEY=$(echo "$ACS_ACCESS_KEY" | base64 -d)
+SIGNATURE=$(printf "%s" "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$DECODED_KEY" -binary | base64)
 
 HTTP_STATUS=$(curl -s -o /tmp/acs_response.txt -w "%{http_code}" \
   -X POST \
-  "${ACS_ENDPOINT}${API_PATH}" \
+  "${ACS_ENDPOINT}${ACS_PATH}" \
   -H "Content-Type: application/json" \
   -H "x-ms-date: ${ACS_DATE}" \
   -H "x-ms-content-sha256: ${CONTENT_HASH}" \
   -H "Authorization: HMAC-SHA256 SignedHeaders=x-ms-date;host;x-ms-content-sha256&Signature=${SIGNATURE}" \
-  -d "$EMAIL_PAYLOAD")
+  -d @/tmp/email_payload.json)
 
 if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
   OPERATION_ID=$(jq -r '.id // "unknown"' /tmp/acs_response.txt)
