@@ -189,8 +189,9 @@ if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
   OPERATION_ID=$(jq -r '.id // "unknown"' /tmp/acs_response.txt)
   echo "Email queued successfully (HTTP $HTTP_STATUS, operation: $OPERATION_ID)"
 else
-  echo "::warning::Email send failed (HTTP $HTTP_STATUS)"
+  echo "::error::Email send failed (HTTP $HTTP_STATUS)"
   cat /tmp/acs_response.txt 2>/dev/null || true
+  exit 1
 fi
 
 echo "=== Summary email step complete ==="
