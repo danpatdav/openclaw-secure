@@ -169,8 +169,7 @@ jobs:
           echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
 
           if [ "$VERDICT" = "blocked" ]; then
-            echo "::error::Agent behavior flagged as ANOMALOUS — next run will be blocked"
-            exit 1
+            echo "::warning::Agent behavior flagged as ANOMALOUS — next run will be blocked"
           fi
 
       - name: Generate summary and send email

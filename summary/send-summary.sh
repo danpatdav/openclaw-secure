@@ -148,15 +148,33 @@ jq -n \
     }
   }' > /tmp/email_payload.json
 
-# Send via ACS Email REST API using connection string auth
-# Use curl with HMAC-SHA256 - compute signature per ACS spec
+# Send via ACS Email REST API using HMAC-SHA256 connection string auth
+# Use python3 for HMAC computation — bash can't handle binary keys with null bytes
 ACS_HOST=$(echo "$ACS_ENDPOINT" | sed 's|https://||' | sed 's|/$||')
-ACS_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S GMT")
 ACS_PATH="/emails:send?api-version=2023-03-31"
-CONTENT_HASH=$(openssl dgst -sha256 -binary /tmp/email_payload.json | base64)
-STRING_TO_SIGN=$(printf "POST\n%s\n%s;%s;%s" "$ACS_PATH" "$ACS_DATE" "$ACS_HOST" "$CONTENT_HASH")
-DECODED_KEY=$(echo "$ACS_ACCESS_KEY" | base64 -d)
-SIGNATURE=$(printf "%s" "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$DECODED_KEY" -binary | base64)
+
+# Compute HMAC auth headers with python3 (handles binary keys correctly)
+python3 -c "
+import hmac, hashlib, base64, datetime
+
+key = base64.b64decode('$ACS_ACCESS_KEY')
+date = datetime.datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
+
+with open('/tmp/email_payload.json', 'rb') as f:
+    content = f.read()
+content_hash = base64.b64encode(hashlib.sha256(content).digest()).decode()
+
+host = '$ACS_HOST'
+path = '$ACS_PATH'
+string_to_sign = f'POST\n{path}\n{date};{host};{content_hash}'
+signature = base64.b64encode(hmac.new(key, string_to_sign.encode(), hashlib.sha256).digest()).decode()
+
+with open('/tmp/acs_auth.env', 'w') as f:
+    f.write(f'ACS_DATE={date}\n')
+    f.write(f'CONTENT_HASH={content_hash}\n')
+    f.write(f'SIGNATURE={signature}\n')
+"
+source /tmp/acs_auth.env
 
 HTTP_STATUS=$(curl -s -o /tmp/acs_response.txt -w "%{http_code}" \
   -X POST \
