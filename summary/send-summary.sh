@@ -183,7 +183,7 @@ HTTP_STATUS=$(curl -s -o /tmp/acs_response.txt -w "%{http_code}" \
   -H "x-ms-date: ${ACS_DATE}" \
   -H "x-ms-content-sha256: ${CONTENT_HASH}" \
   -H "Authorization: HMAC-SHA256 SignedHeaders=x-ms-date;host;x-ms-content-sha256&Signature=${SIGNATURE}" \
-  -d @/tmp/email_payload.json)
+  --data-binary @/tmp/email_payload.json)
 
 if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
   OPERATION_ID=$(jq -r '.id // "unknown"' /tmp/acs_response.txt)
