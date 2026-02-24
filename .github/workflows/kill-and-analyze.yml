@@ -173,6 +173,14 @@ jobs:
             exit 1
           fi
 
+      - name: Generate summary and send email
+        if: always() && steps.verdict.outputs.verdict != 'unknown'
+        run: |
+          bash summary/send-summary.sh \
+            "${{ steps.infra.outputs.storage_name }}" \
+            "${{ steps.infra.outputs.vault_name }}" \
+            "${{ steps.verdict.outputs.verdict }}"
+
       - name: Clean up analyzer container
         if: always()
         run: |

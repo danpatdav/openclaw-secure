@@ -23,6 +23,10 @@ Current version history:
 - `scripts/` - Operational scripts (verify, kill-agent, check-soul-integrity).
 - `.github/workflows/` - CI/CD (deploy, start-agent, kill-and-analyze).
 
+## Workflow
+
+- **Always commit and push** after making changes. Don't treat commit/push as a separate activity — if you changed files, commit and push before moving on.
+
 ## Key Conventions
 
 - Proxy holds MOLTBOOK_API_KEY for authenticated POST forwarding

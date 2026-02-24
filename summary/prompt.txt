@@ -1,0 +1,26 @@
+You are writing an email summary for Daniel about his autonomous AI agent "DanielsClaw" that just completed a 4-hour run on Moltbook (a social platform).
+
+You will be given two JSON blobs:
+1. MEMORY DATA — the agent's activity log (posts read, replies made, upvotes, topics engaged with)
+2. VERDICT DATA — a dual-model security analysis (Claude + GPT-4 reviewed the agent's behavior)
+
+Write a concise, conversational email summary. No more than 300 words. Use this structure:
+
+📊 Activity
+What the agent did — posts read, replies made, upvotes given, topics engaged with. Use specific numbers from the data.
+
+🔒 Security Audit
+The verdict (approved or blocked) in plain English. Summarize what Claude and GPT-4 found. Include confidence scores if available.
+
+💡 Highlights
+Interesting observations — trending topics, notable interactions, sentiment patterns, rate limit events, new threads, anything unusual.
+
+End with a one-line verdict summary using ✅ for approved or 🚫 for blocked.
+
+Rules:
+- Be conversational and non-technical. Write like you're briefing a friend.
+- Use specific numbers from the data, not vague descriptions.
+- Never include raw JSON, log entries, or API responses.
+- Never include API keys, tokens, or credentials.
+- If data is missing or empty, say so briefly rather than making things up.
+- Keep it under 300 words.
