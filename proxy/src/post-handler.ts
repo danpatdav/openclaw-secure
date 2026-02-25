@@ -7,48 +7,135 @@ import type { PostLogEntry } from "./types";
 const MOLTBOOK_API_KEY = process.env.MOLTBOOK_API_KEY || "";
 const MOLTBOOK_BASE_URL = "https://www.moltbook.com/api/v1";
 
-// --- Rate Limiter (in-memory, sliding window) ---
+// --- Activity Tracker & Anomaly Detection ---
+// Replaces fixed rate limits with statistical observation.
+// Phase 1: observe-only (log anomalies, never block).
 
-interface RateWindow {
-  timestamps: number[];
+interface CycleActivity {
+  timestamp: number;
+  posts_attempted: number;
+  posts_succeeded: number;
+  votes_attempted: number;
+  votes_succeeded: number;
 }
 
-const rateLimits = {
-  post_hourly: { max: 3, windowMs: 60 * 60 * 1000 },
-  post_daily: { max: 10, windowMs: 24 * 60 * 60 * 1000 },
-  vote_hourly: { max: 20, windowMs: 60 * 60 * 1000 },
+const ACTIVITY_WINDOW_SIZE = 50; // rolling window for stats
+const ANOMALY_THRESHOLD_SIGMA = 2; // standard deviations
+
+const activityHistory: CycleActivity[] = [];
+let currentCycle: CycleActivity = {
+  timestamp: Date.now(),
+  posts_attempted: 0,
+  posts_succeeded: 0,
+  votes_attempted: 0,
+  votes_succeeded: 0,
 };
 
-const rateWindows: Record<string, RateWindow> = {
-  post_hourly: { timestamps: [] },
-  post_daily: { timestamps: [] },
-  vote_hourly: { timestamps: [] },
-};
+// Rotate cycle every 5 minutes (matching agent cycle interval)
+const CYCLE_ROTATION_MS = 5 * 60 * 1000;
+let lastCycleRotation = Date.now();
 
-function checkRateLimit(key: string): { allowed: boolean; reason?: string } {
-  const limit = rateLimits[key as keyof typeof rateLimits];
-  const window = rateWindows[key];
-  if (!limit || !window) return { allowed: true };
-
+function rotateCycleIfNeeded(): void {
   const now = Date.now();
-  window.timestamps = window.timestamps.filter((t) => now - t < limit.windowMs);
-
-  if (window.timestamps.length >= limit.max) {
-    return {
-      allowed: false,
-      reason: `Rate limit exceeded: ${key} (${limit.max} per ${limit.windowMs / 3600000}h)`,
+  if (now - lastCycleRotation >= CYCLE_ROTATION_MS) {
+    // Check for anomalies before archiving
+    checkForAnomalies(currentCycle);
+    activityHistory.push(currentCycle);
+    if (activityHistory.length > ACTIVITY_WINDOW_SIZE) {
+      activityHistory.shift();
+    }
+    currentCycle = {
+      timestamp: now,
+      posts_attempted: 0,
+      posts_succeeded: 0,
+      votes_attempted: 0,
+      votes_succeeded: 0,
     };
-  }
-
-  return { allowed: true };
-}
-
-function recordRate(key: string): void {
-  const window = rateWindows[key];
-  if (window) {
-    window.timestamps.push(Date.now());
+    lastCycleRotation = now;
   }
 }
+
+function recordActivity(action: "post" | "vote", succeeded: boolean): void {
+  rotateCycleIfNeeded();
+  if (action === "post") {
+    currentCycle.posts_attempted++;
+    if (succeeded) currentCycle.posts_succeeded++;
+  } else {
+    currentCycle.votes_attempted++;
+    if (succeeded) currentCycle.votes_succeeded++;
+  }
+}
+
+function computeStats(values: number[]): { mean: number; stddev: number } {
+  if (values.length === 0) return { mean: 0, stddev: 0 };
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
+  return { mean, stddev: Math.sqrt(variance) };
+}
+
+function checkForAnomalies(cycle: CycleActivity): void {
+  if (activityHistory.length < 5) return; // need minimum baseline
+
+  const postCounts = activityHistory.map((c) => c.posts_attempted);
+  const voteCounts = activityHistory.map((c) => c.votes_attempted);
+
+  const postStats = computeStats(postCounts);
+  const voteStats = computeStats(voteCounts);
+
+  const anomalies: string[] = [];
+
+  // Check posts
+  if (postStats.stddev > 0) {
+    const postZ = (cycle.posts_attempted - postStats.mean) / postStats.stddev;
+    if (Math.abs(postZ) > ANOMALY_THRESHOLD_SIGMA) {
+      const direction = postZ > 0 ? "high" : "low";
+      anomalies.push(
+        `posts_${direction}: ${cycle.posts_attempted} (mean=${postStats.mean.toFixed(1)}, σ=${postStats.stddev.toFixed(1)}, z=${postZ.toFixed(1)})`
+      );
+    }
+  }
+
+  // Check votes
+  if (voteStats.stddev > 0) {
+    const voteZ = (cycle.votes_attempted - voteStats.mean) / voteStats.stddev;
+    if (Math.abs(voteZ) > ANOMALY_THRESHOLD_SIGMA) {
+      const direction = voteZ > 0 ? "high" : "low";
+      anomalies.push(
+        `votes_${direction}: ${cycle.votes_attempted} (mean=${voteStats.mean.toFixed(1)}, σ=${voteStats.stddev.toFixed(1)}, z=${voteZ.toFixed(1)})`
+      );
+    }
+  }
+
+  if (anomalies.length > 0) {
+    proxyLog({
+      timestamp: new Date().toISOString(),
+      method: "POST",
+      hostname: "anomaly-detector",
+      port: 0,
+      path: "/activity-anomaly",
+      allowed: true, // observe-only: never blocks
+      sanitized: false,
+      duration_ms: 0,
+    });
+    process.stdout.write(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "warn",
+        component: "anomaly-detector",
+        message: "Activity anomaly detected",
+        anomalies,
+        cycle_posts: cycle.posts_attempted,
+        cycle_votes: cycle.votes_attempted,
+        baseline_cycles: activityHistory.length,
+        post_stats: postStats,
+        vote_stats: voteStats,
+      }) + "\n"
+    );
+  }
+}
+
+// Export for testing
+export { activityHistory, currentCycle, computeStats, checkForAnomalies, recordActivity, rotateCycleIfNeeded, ANOMALY_THRESHOLD_SIGMA };
 
 // --- Response Helper ---
 
@@ -120,24 +207,8 @@ async function handlePost(socket: Socket, body: Buffer): Promise<void> {
   logEntry.content_length = data.content.length;
   logEntry.thread_id = data.thread_id;
 
-  // Rate limit checks
-  const hourlyCheck = checkRateLimit("post_hourly");
-  if (!hourlyCheck.allowed) {
-    logEntry.blocked_reason = hourlyCheck.reason;
-    logEntry.duration_ms = performance.now() - start;
-    logPostAttempt(logEntry);
-    sendResponse(socket, 429, "Too Many Requests", JSON.stringify({ error: hourlyCheck.reason }));
-    return;
-  }
-
-  const dailyCheck = checkRateLimit("post_daily");
-  if (!dailyCheck.allowed) {
-    logEntry.blocked_reason = dailyCheck.reason;
-    logEntry.duration_ms = performance.now() - start;
-    logPostAttempt(logEntry);
-    sendResponse(socket, 429, "Too Many Requests", JSON.stringify({ error: dailyCheck.reason }));
-    return;
-  }
+  // Record activity for anomaly detection (observe-only, never blocks)
+  rotateCycleIfNeeded();
 
   // Content scanning (reuse existing sanitizer)
   const scanResult = sanitize(data.content);
@@ -201,8 +272,7 @@ async function handlePost(socket: Socket, body: Buffer): Promise<void> {
     logEntry.moltbook_status = res.status;
     logEntry.duration_ms = performance.now() - start;
 
-    recordRate("post_hourly");
-    recordRate("post_daily");
+    recordActivity("post", true);
 
     const responseBody = await res.text();
     logPostAttempt(logEntry);
@@ -297,15 +367,8 @@ async function handleVote(socket: Socket, body: Buffer): Promise<void> {
   const data = validation.data;
   logEntry.post_id = data.post_id;
 
-  // Rate limit check
-  const voteCheck = checkRateLimit("vote_hourly");
-  if (!voteCheck.allowed) {
-    logEntry.blocked_reason = voteCheck.reason;
-    logEntry.duration_ms = performance.now() - start;
-    logPostAttempt(logEntry);
-    sendResponse(socket, 429, "Too Many Requests", JSON.stringify({ error: voteCheck.reason }));
-    return;
-  }
+  // Record activity for anomaly detection (observe-only, never blocks)
+  rotateCycleIfNeeded();
 
   // Forward to Moltbook
   try {
@@ -323,7 +386,7 @@ async function handleVote(socket: Socket, body: Buffer): Promise<void> {
     logEntry.moltbook_status = res.status;
     logEntry.duration_ms = performance.now() - start;
 
-    recordRate("vote_hourly");
+    recordActivity("vote", true);
 
     const responseBody = await res.text();
     logPostAttempt(logEntry);

@@ -39,6 +39,36 @@ let postsReadCount = 0;
 let upvotesCount = 0;
 let checkpointNum = 0;
 
+// --- Schema Normalization ---
+// Proxy's Zod schema expects specific enum values. Claude may return variants.
+
+const VALID_SENTIMENTS = new Set(["positive", "neutral", "negative"]);
+const VALID_TOPICS = new Set(["ai_safety", "agent_design", "moltbook_meta", "social", "technical", "other"]);
+
+const TOPIC_ALIASES = {
+  tech: "technical",
+  ai: "ai_safety",
+  meta: "moltbook_meta",
+  humor: "social",
+  politics: "other",
+  crypto: "other",
+  spam: "other",
+};
+
+function normalizeSentiment(s) {
+  if (typeof s === "string" && VALID_SENTIMENTS.has(s)) return s;
+  return "neutral";
+}
+
+function normalizeTopic(t) {
+  if (typeof t === "string") {
+    if (VALID_TOPICS.has(t)) return t;
+    const alias = TOPIC_ALIASES[t.toLowerCase()];
+    if (alias) return alias;
+  }
+  return "other";
+}
+
 // --- Structured Logging ---
 
 function log(level, message, data = {}) {
@@ -106,8 +136,8 @@ function buildMemoryPayload() {
       type: "post_seen",
       post_id: postId,
       timestamp: new Date().toISOString(),
-      topic_label: label?.topic || "other",
-      sentiment: label?.sentiment || "neutral",
+      topic_label: normalizeTopic(label?.topic),
+      sentiment: normalizeSentiment(label?.sentiment),
     });
   }
 
@@ -128,12 +158,20 @@ function buildMemoryPayload() {
   }
 
   checkpointNum++;
-  return {
+
+  // Size-aware pruning: trim oldest post_seen entries until under 900KB
+  // Keep post_made and thread_tracked intact (fewer, more valuable)
+  const MAX_PAYLOAD_BYTES = 900 * 1024; // 900KB — leave margin under 1MB proxy limit
+
+  const nonPostSeen = entries.filter(e => e.type !== "post_seen");
+  let postSeenEntries = entries.filter(e => e.type === "post_seen");
+
+  let payload = {
     version: 1,
     run_id: `${runId}-cp${checkpointNum}`,
     run_start: runStart,
     run_end: new Date().toISOString(),
-    entries: entries.slice(0, 10000), // respect max entries limit
+    entries: [...nonPostSeen, ...postSeenEntries],
     stats: {
       posts_read: postsReadCount,
       posts_made: postsMade.length,
@@ -141,6 +179,39 @@ function buildMemoryPayload() {
       threads_tracked: trackedThreads.size,
     },
   };
+
+  let serialized = JSON.stringify(payload);
+  if (serialized.length > MAX_PAYLOAD_BYTES && postSeenEntries.length > 100) {
+    // Keep the most recent post_seen entries (they're at the end since seenPostIds is insertion-ordered)
+    const originalCount = postSeenEntries.length;
+    // Binary search for the right trim point
+    let lo = 0, hi = postSeenEntries.length;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi + 1) / 2);
+      payload.entries = [...nonPostSeen, ...postSeenEntries.slice(-mid)];
+      if (JSON.stringify(payload).length <= MAX_PAYLOAD_BYTES) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    postSeenEntries = postSeenEntries.slice(-lo);
+    payload.entries = [...nonPostSeen, ...postSeenEntries];
+    serialized = JSON.stringify(payload);
+    log("info", "Memory pruned for size", {
+      original_entries: originalCount,
+      kept_entries: postSeenEntries.length,
+      trimmed: originalCount - postSeenEntries.length,
+      payload_bytes: serialized.length,
+    });
+  }
+
+  // Also respect max 10000 entries
+  if (payload.entries.length > 10000) {
+    payload.entries = payload.entries.slice(-10000);
+  }
+
+  return payload;
 }
 
 async function saveMemory() {
