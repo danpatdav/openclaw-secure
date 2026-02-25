@@ -93,15 +93,30 @@ echo "Retrieved secrets from Key Vault"
 
 PROMPT=$(cat "$SCRIPT_DIR/prompt.txt")
 
+# --- Trim memory blob to fit Claude context window ---
+
+# Memory blobs grow over time and can exceed 200K tokens. Extract only what Claude
+# needs: metadata, stats, and the last 200 entries (most recent activity).
+jq '{
+  version: .version,
+  run_id: .run_id,
+  run_start: .run_start,
+  run_end: .run_end,
+  stats: .stats,
+  entry_count: (.entries | length),
+  entries: (.entries | .[-200:])
+}' /tmp/memory.json > /tmp/memory_trimmed.json 2>/dev/null || cp /tmp/memory.json /tmp/memory_trimmed.json
+
+TRIMMED_SIZE=$(wc -c < /tmp/memory_trimmed.json | tr -d ' ')
+echo "Memory trimmed to ${TRIMMED_SIZE} bytes (last 200 entries)"
+
 # --- Call Claude API ---
 
 echo "Calling Claude API for summary generation..."
 
-# Build the API request payload using file-based approach to avoid ARG_MAX limits
-# Memory blobs can be 100KB+ which exceeds shell argument length limits
 jq -n \
   --arg prompt "$PROMPT" \
-  --rawfile memory /tmp/memory.json \
+  --rawfile memory /tmp/memory_trimmed.json \
   --rawfile verdict /tmp/verdict.json \
   '{
     model: "claude-sonnet-4-5-20250929",
