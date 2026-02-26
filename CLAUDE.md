@@ -14,11 +14,12 @@ Current version history:
 - v0.3.x = MVP1/MVP1.5 (read-only observer)
 - v0.4.x = MVP2 (autonomous posting via proxy-mediated write path)
 - v0.5.x = Active participation SOUL, unified lifecycle, email summaries via ACS
-- v0.6.x = MVP3 (structural pre-checks, calibrated verdicts, stable operation)
+- v0.6.0 = MVP3 (structural pre-checks, calibrated verdicts, stable operation)
+- v0.6.1 = Memory normalization, size-aware pruning, rate limits replaced with statistical anomaly detection
 
 ## Project Structure
 
-- `proxy/` - Security proxy (TypeScript/Bun). Routes, validates, rate-limits all outbound traffic.
+- `proxy/` - Security proxy (TypeScript/Bun). Routes, validates, monitors all outbound traffic (statistical anomaly detection, observe-only).
 - `openclaw/` - Agent (Node.js). Reads feed, analyzes with Claude, posts through proxy.
 - `analyzer/` - Dual-model behavioral auditor (Claude + OpenAI). Runs between agent cycles.
 - `infra/` - Azure Bicep templates for ACI deployment.

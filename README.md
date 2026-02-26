@@ -46,7 +46,7 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key isolation:** Agent reads Moltbook via CONNECT tunnel (proxy allowlist) and writes through proxy `/post` and `/vote` endpoints (rate-limited, schema-validated). The Moltbook API key for authenticated POSTs lives on the **proxy**, not the agent — the agent holds only its Anthropic key (Claude analysis) and a Moltbook key scoped to feed reads. Analyzer has direct Blob access but NO access to Moltbook or the agent's runtime. OpenAI key is only in the analyzer container, never the agent.
+**Key isolation:** Agent reads Moltbook via CONNECT tunnel (proxy allowlist) and writes through proxy `/post` and `/vote` endpoints (schema-validated, anomaly-monitored). The Moltbook API key for authenticated POSTs lives on the **proxy**, not the agent — the agent holds only its Anthropic key (Claude analysis) and a Moltbook key scoped to feed reads. Analyzer has direct Blob access but NO access to Moltbook or the agent's runtime. OpenAI key is only in the analyzer container, never the agent.
 
 **Allowed outbound domains (agent):**
 - `api.anthropic.com` — Claude API (analysis)
@@ -60,10 +60,10 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **Network (NSG)** | Deny-all outbound from agent | Agent can only reach proxy subnet on port 3128 |
 | **Application (Proxy)** | Domain allowlist + method restrictions | Only whitelisted domains/methods pass through |
 | **Application (Proxy)** | Prompt injection sanitizer | Detects and replaces injection patterns in responses |
-| **Application (Proxy)** | Rate limiting | 3 posts/hr, 10 posts/day, 20 votes/hr enforced at proxy |
+| **Application (Proxy)** | Statistical anomaly detection | Observe-only: rolling mean + 2σ threshold over 50-cycle window flags unusual activity (no blocking) |
 | **Application (Proxy)** | Content validation | Zod schema: max 500 chars, injection scanning on outbound posts |
 | **Memory (Proxy)** | Zod schema validation | All memory writes validated — no freeform text, fixed enums only |
-| **Memory (Blob)** | Append-only + 1MB size cap | Memory blobs are never overwritten, capped at 10,000 entries |
+| **Memory (Blob)** | Append-only + 1MB size cap | Memory blobs are never overwritten, size-aware pruning keeps payloads under 900KB |
 | **Audit (Analyzer)** | Structural pre-checks + dual-model analysis | Deterministic math validation first; AI consensus at 0.8+ confidence required to block |
 | **Gating (Workflow)** | Verdict-gated lifecycle | kill-and-analyze owns full cycle: kill → analyze → email → restart if approved |
 | **Agent (Config)** | Hardened openclaw.json | Shell/exec/write/git tools denied |
@@ -77,16 +77,17 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 
 1. Agent loads last approved memory from proxy (`GET /memory/latest`)
 2. Agent loops: fetch Moltbook feed → deduplicate posts → analyze with Claude → Claude recommends actions (replies, upvotes) → execute actions through proxy `/post` and `/vote` endpoints → save memory
-3. Memory saves go through proxy (`POST /memory`) → Zod schema validation → Blob Storage
-4. On 429 from proxy rate limiter, agent sets `postRateLimited` / `voteRateLimited` flag and skips remaining actions of that type for the current cycle
-5. After 4 hours, **kill-and-analyze** workflow stops the agent
+3. Agent normalizes Claude's labels to valid schema enums before memory save (e.g., "tech" → "technical", "mixed" → "neutral")
+4. Memory saves go through proxy (`POST /memory`) → Zod schema validation → Blob Storage. Size-aware pruning trims oldest `post_seen` entries to stay under 900KB
+5. Proxy records activity per 5-minute cycle; statistical anomaly detection (2σ, observe-only) flags unusual posting/voting patterns without blocking
+6. After 4 hours, **kill-and-analyze** workflow stops the agent
 
 ### Analysis & Restart Cycle (~15 minutes)
 
 The `kill-and-analyze` workflow owns the full agent lifecycle:
 
 6. Analyzer finds the latest unanalyzed memory blob
-7. **Structural pre-checks** (deterministic, before any AI): minimum 30-minute run duration gate, absolute action counts validated against proxy-enforced limits (3 replies/hr, 20 votes/hr)
+7. **Structural pre-checks** (deterministic, before any AI): minimum 30-minute run duration gate, absolute action counts validated
 8. If structurally valid, sends diff + patterns to **Claude** and **OpenAI GPT-4o** (adversarial prompt focused on content manipulation, not rate speculation)
 9. **Default approved** — blocking requires dual-model consensus: both must say "compromised" with ≥0.8 confidence. Model failures return null (no opinion), not auto-block
 10. Verdict written to `verdicts/<run_id>.json` with structural pre-check details
@@ -230,7 +231,7 @@ proxy/                         — Bun HTTP proxy (security layer)
     allowlist.ts               — Domain + method allowlist enforcement
     sanitizer.ts               — Prompt injection pattern detection
     memory-schema.ts           — Zod schema for memory validation
-    post-handler.ts            — /post and /vote endpoints with rate limiting
+    post-handler.ts            — /post and /vote endpoints with statistical anomaly detection
     post-schema.ts             — Zod schemas for post/vote request validation
     memory-store.ts            — /memory API endpoint + Blob Storage client
     logger.ts                  — Structured JSONL logging
@@ -243,7 +244,7 @@ proxy/                         — Bun HTTP proxy (security layer)
     action-allowlist.json      — MVP2: endpoint-level POST rules
 
 openclaw/                      — Agent container
-  agent.mjs                    — Semi-persistent loop (4hr, 5-min cycles, posting logic, Claude action recommendations, 429 back-off)
+  agent.mjs                    — Semi-persistent loop (4hr, 5-min cycles, posting logic, Claude action recommendations, schema normalization, size-aware pruning)
   Dockerfile                   — Hardened container (non-root, tini init, read-only SOUL)
   package.json                 — Dependencies (undici for proxy support)
   openclaw.json                — Hardened agent config (memory off, tools denied)
@@ -283,6 +284,9 @@ Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 | Workflow can't read blobs | SP lacks Storage Blob Data Reader RBAC | Switched to `--auth-mode key` |
 | Analyzer false positive on posting frequency | Counted upvotes as posts, inflating "posting frequency" metric | Separated per-type metrics: reply rate vs upvote rate |
 | 429 back-off needed | Agent kept trying actions after rate limit hit | Added `postRateLimited` / `voteRateLimited` flags, skip remaining actions of that type |
+| Memory schema validation failures | Claude returns labels like "tech", "mixed" not in Zod enums | Agent-side normalization with alias mapping (e.g., "tech"→"technical", "mixed"→"neutral") |
+| Memory exceeding 1MB limit | Unbounded growth of post_seen entries (7000+) | Size-aware binary-search pruning trims oldest entries to stay under 900KB |
+| Fixed rate limits too restrictive | Arbitrary numbers (3/hr, 10/day) with no behavioral baseline | Replaced with statistical anomaly detection: rolling 50-cycle mean + 2σ threshold, observe-only |
 | Topic classification broken | Hardcoded "other" for all posts | Claude-assigned labels per post during analysis |
 | Reply content not stored | Couldn't audit what the agent actually posted | Added `content` and `status` fields to `post_made` entries |
 | Analyzer false blocks on short runs | Per-hour rate projections unreliable on <30min runs | Added 30-minute minimum duration gate — short runs auto-approve |
