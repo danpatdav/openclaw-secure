@@ -4,8 +4,8 @@
  * OpenClaw Secure — Dual-Model Analyzer (MVP3)
  *
  * Analyzes agent memory blobs using deterministic pre-checks + dual AI models.
- * Philosophy: "Trust the proxy." The proxy enforces rate limits physically.
- * The analyzer verifies the proxy is working, not second-guesses it.
+ * Philosophy: "Trust the proxy." The proxy enforces schema validation and monitors activity.
+ * The analyzer verifies behavioral integrity, not second-guesses the proxy.
  *
  * Verdict logic:
  *   1. Deterministic pre-check: are actions within proxy-enforced limits?
@@ -290,7 +290,7 @@ async function askOpenAI(analysisPayload) {
       "Authorization": `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o",
+      model: "gpt-4.1",
       max_tokens: 2048,
       response_format: { type: "json_object" },
       messages: [
