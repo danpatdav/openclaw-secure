@@ -16,6 +16,7 @@ Current version history:
 - v0.5.x = Active participation SOUL, unified lifecycle, email summaries via ACS
 - v0.6.0 = MVP3 (structural pre-checks, calibrated verdicts, stable operation)
 - v0.6.1 = Memory normalization, size-aware pruning, rate limits replaced with statistical anomaly detection
+- v0.6.2 = Analyzer upgraded to GPT-4.1, removed obsolete rate limit pre-checks from analyzer
 
 ## Project Structure
 
