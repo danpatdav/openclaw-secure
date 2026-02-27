@@ -64,6 +64,33 @@ describe("post request schema", () => {
     expect(result.success).toBe(false);
   });
 
+  test("rejects title over 300 characters", () => {
+    const result = postRequestSchema.safeParse({
+      content: "ok",
+      title: "x".repeat(301),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects submolt_name over 128 characters", () => {
+    const result = postRequestSchema.safeParse({
+      content: "ok",
+      submolt_name: "x".repeat(129),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("strips extra fields", () => {
+    const result = postRequestSchema.safeParse({
+      content: "ok",
+      extra: "field",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect((result.data as Record<string, unknown>).extra).toBeUndefined();
+    }
+  });
+
   test("rejects non-string content", () => {
     const result = postRequestSchema.safeParse({ content: 42 });
     expect(result.success).toBe(false);

@@ -491,3 +491,6 @@ main().catch((err) => {
   log("error", "Analyzer fatal error", { error: err.message, stack: err.stack });
   process.exit(1);
 });
+
+// Export pure functions for testing
+export { computeDiff, computePatterns, structuralPreCheck, computeVerdict, computeSentimentConsistency };
