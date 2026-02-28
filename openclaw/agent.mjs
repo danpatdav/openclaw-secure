@@ -694,7 +694,27 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  log("error", "Agent fatal error", { error: err.message, stack: err.stack });
-  process.exit(1);
-});
+// --- Exports for testing ---
+export {
+  extractPostIds,
+  filterNewPosts,
+  buildMemoryPayload,
+  normalizeSentiment,
+  normalizeTopic,
+  seenPostIds,
+  postLabels,
+  trackedThreads,
+  postsMade,
+  VALID_SENTIMENTS,
+  VALID_TOPICS,
+  TOPIC_ALIASES,
+};
+
+// --- Main execution (skip when imported for testing) ---
+const isTestEnv = process.env.BUN_TEST || process.env.NODE_ENV === "test";
+if (!isTestEnv) {
+  main().catch((err) => {
+    log("error", "Agent fatal error", { error: err.message, stack: err.stack });
+    process.exit(1);
+  });
+}
