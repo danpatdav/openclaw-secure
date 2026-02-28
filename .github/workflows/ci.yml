@@ -27,7 +27,7 @@ jobs:
         run: bun install --frozen-lockfile || bun install
 
       - name: Run unit tests (excludes e2e which needs a running proxy)
-        run: bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts src/indirect-injection.test.ts
+        run: bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts src/indirect-injection.test.ts src/behavioral-drift.test.ts
 
   bicep-validate:
     name: Validate Bicep
