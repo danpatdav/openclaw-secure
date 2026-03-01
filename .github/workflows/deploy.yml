@@ -90,7 +90,7 @@ jobs:
         working-directory: proxy
         run: |
           bun install
-          bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts src/indirect-injection.test.ts src/behavioral-drift.test.ts src/comment.test.ts src/comment-reader.test.ts
+          bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts src/indirect-injection.test.ts src/behavioral-drift.test.ts src/redos.test.ts src/comment.test.ts src/comment-reader.test.ts
 
       - name: Create resource group
         run: |

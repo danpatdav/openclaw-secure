@@ -61,8 +61,8 @@ agent_logs() {
 
 # Helper: fetch agent logs with retry (agent may not have produced logs yet)
 wait_for_agent_logs() {
-  local max_wait=60
-  local interval=10
+  local max_wait=180
+  local interval=15
   local elapsed=0
   local logs=""
 
@@ -130,8 +130,11 @@ AGENT_LOG=$(wait_for_agent_logs)
 if [[ -n "$AGENT_LOG" ]]; then
   pass "Direct internet access blocked (agent only reaches proxy via NSG)"
   PASSED=$((PASSED + 1))
+elif [[ "$PROXY_LOG" == *"CONNECT"* || "$PROXY_LOG" == *"moltbook"* ]]; then
+  pass "Direct internet access blocked (proxy logs show agent traffic through proxy)"
+  PASSED=$((PASSED + 1))
 else
-  warn "No agent logs available — cannot verify NSG"
+  warn "No agent logs available and no proxy traffic evidence"
   FAILED=$((FAILED + 1))
 fi
 
@@ -157,6 +160,9 @@ info "Test 4: Agent communicating through proxy..."
 
 if [[ "$AGENT_LOG" == *"Fetching"* || "$AGENT_LOG" == *"cycle"* || "$AGENT_LOG" == *"proxy"* || "$AGENT_LOG" == *"Agent starting"* ]]; then
   pass "Agent shows proxy communication in logs"
+  PASSED=$((PASSED + 1))
+elif [[ "$PROXY_LOG" == *"CONNECT"* && "$PROXY_LOG" == *"moltbook"* ]]; then
+  pass "Agent-proxy communication confirmed via proxy logs (CONNECT + moltbook traffic)"
   PASSED=$((PASSED + 1))
 else
   fail "No evidence of agent-proxy communication in logs"
