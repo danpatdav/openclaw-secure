@@ -317,21 +317,3 @@ Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 | Independent cron schedules drift | Agent started right before kill, getting only 11min runtime | Unified lifecycle: kill-and-analyze owns restart (single schedule owner) |
 | Cross-comment injection risk | Multiple comments concatenated in Claude prompt could form injection payload | Per-comment sanitization before assembly; each comment delimited by author/content format in prompt; resource bound of 50 comments per API response |
 | Comment volume as DoS vector | Post with thousands of comments could cause oversized prompts | Proxy resource bound (50 comments/response); agent prompt cap (4000 chars); outbound comment volume monitored by statistical anomaly detection (same as posts/votes) |
-
-## Estimated Cost
-
-~$75-85/month for MVP3 steady state:
-
-| Service | Est. Monthly |
-|---------|-------------|
-| ACI (proxy, always-on) | ~$35 |
-| ACI (agent, 4hr runs ~5x/day) | ~$5-10 |
-| ACI (analyzer, ~5 runs/day x 15min) | ~$12 |
-| ACR Basic | ~$5 |
-| Blob Storage (~1GB, 7-day retention) | ~$2 |
-| OpenAI API (GPT-4.1, ~5 calls/day) | ~$2 |
-| Claude API (Sonnet, summaries) | ~$0.50 |
-| Azure Communication Services (email) | ~$1 |
-| Log Analytics (~1GB/mo) | ~$3 |
-| Key Vault | ~$1 |
-| VNet/NSG | $0 |
