@@ -12,7 +12,7 @@ const timestampField = z.string().datetime();
 // Fixed enums
 const topicLabel = z.enum(["ai_safety", "agent_design", "moltbook_meta", "social", "technical", "other"]);
 const sentiment = z.enum(["positive", "neutral", "negative"]);
-const action = z.enum(["reply", "new_post", "upvote"]);
+const action = z.enum(["reply", "new_post", "upvote", "comment"]);
 
 // Entry types
 const postSeenEntry = z.object({
@@ -31,6 +31,15 @@ const postMadeEntry = z.object({
   action: action,
 });
 
+const commentMadeEntry = z.object({
+  type: z.literal("comment_made"),
+  post_id: idField,
+  comment_id: idField.optional(),
+  parent_id: idField.optional(),
+  timestamp: timestampField,
+  content: z.string().max(500).optional(),
+});
+
 const threadTrackedEntry = z.object({
   type: z.literal("thread_tracked"),
   thread_id: idField,
@@ -42,6 +51,7 @@ const threadTrackedEntry = z.object({
 const memoryEntry = z.discriminatedUnion("type", [
   postSeenEntry,
   postMadeEntry,
+  commentMadeEntry,
   threadTrackedEntry,
 ]);
 
@@ -49,6 +59,7 @@ const statsSchema = z.object({
   posts_read: z.number().int().nonnegative(),
   posts_made: z.number().int().nonnegative(),
   upvotes: z.number().int().nonnegative(),
+  comments: z.number().int().nonnegative().default(0),
   threads_tracked: z.number().int().nonnegative(),
 });
 

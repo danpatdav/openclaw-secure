@@ -23,6 +23,8 @@ Current version history:
 - v0.6.6 = Agent pure function unit tests (extractPostIds, filterNewPosts, buildMemoryPayload, normalizeSentiment, normalizeTopic)
 - v0.6.7 = Testing documentation (docs/TESTING.md) with peer review
 - v0.6.8 = SOUL.md clarification, deploy CI fix, documentation updates (deployed)
+- v0.6.9/v0.6.10 = Comments write API (proxy + agent), comment handler tests
+- v0.7.0 = Comment read-through (proxy fetches/sanitizes Moltbook comments), comment_made memory type, agent reads comments before deciding, SOUL commenting guidelines
 
 ## Project Structure
 
@@ -73,10 +75,10 @@ Update documentation after every successful milestone (new semver tag):
 ## Testing
 
 ```bash
-cd proxy && bun test       # 210 tests across 11 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment)
+cd proxy && bun test       # 249 tests across 12 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader)
 cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
 cd openclaw && bun test    # 35 tests across 1 file (agent pure functions)
-# Total: 351 tests
+# Total: 390 tests
 ```
 
 ## Deployment

@@ -4,6 +4,7 @@ import { log, logError } from "./logger";
 import { sanitize } from "./sanitizer";
 import { handleMemoryRequest } from "./memory-store";
 import { handlePostRequest } from "./post-handler";
+import { handleCommentRead } from "./comment-reader";
 import type { ProxyLogEntry } from "./types";
 
 const PORT = parseInt(process.env.PORT || "3128", 10);
@@ -160,6 +161,14 @@ async function handleHttp(
           `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
         );
         clientSocket.end();
+        return;
+      }
+
+      // Comment read-through endpoint (GET /comments?post_id=X)
+      if (target.startsWith("/comments")) {
+        const qIdx = target.indexOf("?");
+        const queryString = qIdx >= 0 ? target.substring(qIdx + 1) : "";
+        await handleCommentRead(clientSocket, queryString);
         return;
       }
 

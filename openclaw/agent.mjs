@@ -35,6 +35,8 @@ const seenPostIds = new Set();
 const postLabels = new Map(); // post_id -> { topic, sentiment }
 const trackedThreads = new Map();
 const postsMade = [];
+const commentsMade = []; // comment_made entries (separate from post_made)
+const myCommentedPosts = new Set(); // post IDs we've commented on (for response checking)
 let postsReadCount = 0;
 let upvotesCount = 0;
 let commentsCount = 0;
@@ -106,7 +108,7 @@ async function loadMemory() {
       log("info", "No approved memory available — starting fresh");
       return;
     }
-    // Load seen post IDs for dedup
+    // Load seen post IDs for dedup, and track own commented posts
     for (const entry of result.data.entries) {
       if (entry.type === "post_seen") {
         seenPostIds.add(entry.post_id);
@@ -116,11 +118,17 @@ async function loadMemory() {
           first_seen: entry.first_seen,
           last_interaction: entry.last_interaction,
         });
+      } else if (entry.type === "comment_made") {
+        myCommentedPosts.add(entry.post_id);
+      } else if (entry.type === "post_made" && entry.action === "comment") {
+        // Backward compat: older entries stored comments as post_made with action: "comment"
+        myCommentedPosts.add(entry.post_id);
       }
     }
     log("info", "Memory loaded", {
       seen_posts: seenPostIds.size,
       tracked_threads: trackedThreads.size,
+      commented_posts: myCommentedPosts.size,
     });
   } catch (err) {
     log("warn", "Failed to load memory — starting fresh", { error: err.message });
@@ -156,6 +164,11 @@ function buildMemoryPayload() {
   // Posts made entries
   for (const post of postsMade) {
     entries.push(post);
+  }
+
+  // Comment made entries (new type, separate from post_made)
+  for (const comment of commentsMade) {
+    entries.push(comment);
   }
 
   checkpointNum++;
@@ -433,6 +446,34 @@ async function commentOnPost(postId, content, parentId) {
   }
 }
 
+// --- Comment Read-Through ---
+
+async function fetchPostComments(postId) {
+  try {
+    log("info", "Fetching comments for post via proxy read-through...", { post_id: postId });
+
+    // Direct fetch — /comments endpoint is ON the proxy (read-through)
+    const res = await fetch(`${PROXY_BASE_URL}/comments?post_id=${encodeURIComponent(postId)}`);
+
+    if (!res.ok) {
+      const body = await res.text();
+      log("warn", "Comment fetch returned non-OK", { post_id: postId, status: res.status, body: body.slice(0, 200) });
+      return { ok: false, comments: [], comment_count: 0 };
+    }
+
+    const result = await res.json();
+    log("info", "Comments fetched", {
+      post_id: postId,
+      comment_count: result.comment_count || 0,
+      sanitized_any: result.comments?.some(c => c.sanitized) || false,
+    });
+    return { ok: true, comments: result.comments || [], comment_count: result.comment_count || 0 };
+  } catch (err) {
+    log("error", "Comment fetch failed", { post_id: postId, error: err.message });
+    return { ok: false, comments: [], comment_count: 0 };
+  }
+}
+
 // --- Single Cycle ---
 
 async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
@@ -453,13 +494,62 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
   const dedup = filterNewPosts(feed.body);
   log("info", "Post deduplication", dedup);
 
-  if (dedup.new === 0) {
-    log("info", "No new posts — skipping analysis");
+  if (dedup.new === 0 && myCommentedPosts.size === 0) {
+    log("info", "No new posts and no prior comments to check — skipping analysis");
     return;
   }
 
+  // Fetch comments for posts we've previously commented on (check for replies)
+  let commentContext = "";
+  if (myCommentedPosts.size > 0) {
+    const postsToCheck = Array.from(myCommentedPosts).slice(0, 5); // Check up to 5 prior posts
+    log("info", "Checking for replies on previously commented posts", { count: postsToCheck.length });
+
+    const commentResults = [];
+    for (const postId of postsToCheck) {
+      const result = await fetchPostComments(postId);
+      if (result.ok && result.comment_count > 0) {
+        commentResults.push({ post_id: postId, comments: result.comments, count: result.comment_count });
+      }
+    }
+
+    if (commentResults.length > 0) {
+      commentContext = "\n\n--- EXISTING COMMENTS ON POSTS YOU'VE ENGAGED WITH ---\n";
+      for (const r of commentResults) {
+        commentContext += `\nPost ${r.post_id} (${r.count} comments):\n`;
+        for (const c of r.comments.slice(0, 10)) {
+          const sanitizedTag = c.sanitized ? " [SANITIZED]" : "";
+          commentContext += `  - ${c.author}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
+        }
+      }
+      commentContext += "\nCheck if anyone replied to your previous comments and respond if appropriate.\n";
+    }
+  }
+
+  // Also fetch comments for up to 3 new posts to inform commenting decisions
+  const newPostIds = extractPostIds(feed.body).filter(id => !myCommentedPosts.has(id)).slice(0, 3);
+  if (newPostIds.length > 0) {
+    const newPostComments = [];
+    for (const postId of newPostIds) {
+      const result = await fetchPostComments(postId);
+      if (result.ok && result.comment_count > 0) {
+        newPostComments.push({ post_id: postId, comments: result.comments, count: result.comment_count });
+      }
+    }
+    if (newPostComments.length > 0) {
+      commentContext += "\n\n--- COMMENTS ON NEW POSTS ---\n";
+      for (const r of newPostComments) {
+        commentContext += `\nPost ${r.post_id} (${r.count} comments):\n`;
+        for (const c of r.comments.slice(0, 5)) {
+          const sanitizedTag = c.sanitized ? " [SANITIZED]" : "";
+          commentContext += `  - ${c.author}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
+        }
+      }
+    }
+  }
+
   // Analyze with Claude and get posting decisions
-  log("info", "Analyzing feed with Claude...");
+  log("info", "Analyzing feed with Claude...", { has_comment_context: commentContext.length > 0 });
 
   const systemPrompt = `${soul}
 
@@ -499,14 +589,20 @@ Rules for posting decisions:
 - When uncertain, skip — observation is fine
 
 Rules for commenting:
+- Read the existing comments shown above BEFORE deciding to comment — understand the conversation first
 - Use comments to engage in threaded discussions on specific posts
 - Include post_id to comment on a post, and optional parent_id to reply to a specific comment
 - Prefer comments over posts when engaging in an existing conversation
+- Prioritize responding to replies on your own previous comments over starting new threads
+- If someone replied to your comment, respond to continue the conversation (use their comment's id as parent_id)
 - Max 3 comments per cycle
 - Keep each comment under 500 characters
-- Comments are better for short reactions, follow-up questions, and building on others' points`;
+- Comments are better for short reactions, follow-up questions, and building on others' points
+- If a post already has many comments making the same point, don't pile on`;
 
-  const userMessage = `Here is the Moltbook feed content (HTTP ${feed.status}, cycle ${cycleNum}, ${dedup.new} new posts):\n\n${feed.body.slice(0, 8000)}`;
+  const feedSlice = feed.body.slice(0, 8000);
+  const commentSlice = commentContext.slice(0, 4000); // Cap comment context to avoid token bloat
+  const userMessage = `Here is the Moltbook feed content (HTTP ${feed.status}, cycle ${cycleNum}, ${dedup.new} new posts):\n\n${feedSlice}${commentSlice}`;
 
   try {
     const rawAnalysis = await askClaude(apiKey, systemPrompt, userMessage);
@@ -652,17 +748,19 @@ Rules for commenting:
       const result = await commentOnPost(comment.post_id, comment.content, comment.parent_id);
       if (result.ok) {
         commentsCount++;
-        postsMade.push({
-          type: "post_made",
+        const commentId = result.data?.id || result.data?.comment_id || `unknown-${Date.now()}`;
+        commentsMade.push({
+          type: "comment_made",
           post_id: String(comment.post_id),
-          thread_id: comment.parent_id || comment.post_id,
-          content: comment.content,
+          comment_id: String(commentId),
+          parent_id: comment.parent_id ? String(comment.parent_id) : undefined,
           timestamp: new Date().toISOString(),
-          action: "comment",
-          status: "success",
+          content: comment.content,
         });
+        myCommentedPosts.add(String(comment.post_id));
       } else if (result.status === 429) {
         commentRateLimited = true;
+        // Still record the attempt as post_made for backward compat audit trail
         postsMade.push({
           type: "post_made",
           post_id: String(comment.post_id),
@@ -794,6 +892,8 @@ export {
   postLabels,
   trackedThreads,
   postsMade,
+  commentsMade,
+  myCommentedPosts,
   VALID_SENTIMENTS,
   VALID_TOPICS,
   TOPIC_ALIASES,

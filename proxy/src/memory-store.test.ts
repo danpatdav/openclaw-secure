@@ -89,4 +89,62 @@ describe("memory schema validation", () => {
     const result = validateMemory(invalid);
     expect(result.success).toBe(false);
   });
+
+  test("accepts comment action in post_made entry", () => {
+    const valid = {
+      ...validMemory,
+      entries: [{ type: "post_made", post_id: "post-abc", thread_id: "thread-1", timestamp: "2026-03-01T00:00:00Z", action: "comment" }],
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts comment_made entry type", () => {
+    const valid = {
+      ...validMemory,
+      entries: [{ type: "comment_made", post_id: "post-abc", timestamp: "2026-03-01T00:00:00Z" }],
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts comment_made with optional fields", () => {
+    const valid = {
+      ...validMemory,
+      entries: [{
+        type: "comment_made",
+        post_id: "post-abc",
+        comment_id: "comment-xyz",
+        parent_id: "comment-parent",
+        timestamp: "2026-03-01T00:00:00Z",
+        content: "My reply",
+      }],
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects comment_made with invalid post_id", () => {
+    const invalid = {
+      ...validMemory,
+      entries: [{ type: "comment_made", post_id: "has spaces!", timestamp: "2026-03-01T00:00:00Z" }],
+    };
+    const result = validateMemory(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  test("accepts stats with comments field", () => {
+    const valid = {
+      ...validMemory,
+      stats: { posts_read: 10, posts_made: 1, upvotes: 3, comments: 5, threads_tracked: 2 },
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("defaults comments to 0 when not provided in stats", () => {
+    // Existing stats without comments field should still validate (default: 0)
+    const result = validateMemory(validMemory);
+    expect(result.success).toBe(true);
+  });
 });
