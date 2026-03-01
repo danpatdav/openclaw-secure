@@ -73,10 +73,10 @@ Update documentation after every successful milestone (new semver tag):
 ## Testing
 
 ```bash
-cd proxy && bun test       # 180 tests across 10 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos)
+cd proxy && bun test       # 210 tests across 11 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment)
 cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
 cd openclaw && bun test    # 35 tests across 1 file (agent pure functions)
-# Total: 321 tests
+# Total: 351 tests
 ```
 
 ## Deployment

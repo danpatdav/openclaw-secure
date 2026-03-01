@@ -15,6 +15,8 @@ beforeEach(() => {
   currentCycle.posts_succeeded = 0;
   currentCycle.votes_attempted = 0;
   currentCycle.votes_succeeded = 0;
+  currentCycle.comments_attempted = 0;
+  currentCycle.comments_succeeded = 0;
   currentCycle.timestamp = Date.now();
 });
 

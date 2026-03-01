@@ -67,6 +67,7 @@ export interface MemoryStats {
   posts_read: number;
   posts_made: number;
   upvotes: number;
+  comments: number;
   threads_tracked: number;
 }
 
