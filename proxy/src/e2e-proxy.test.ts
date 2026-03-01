@@ -4,7 +4,8 @@ import { spawn, type Subprocess } from "bun";
 // E2E tests need more time for proxy startup
 setDefaultTimeout(30_000);
 
-const PROXY_DIR = "/Users/danieldavis/Projects/openclaw-secure/proxy";
+import { resolve, dirname } from "path";
+const PROXY_DIR = resolve(dirname(new URL(import.meta.url).pathname), "..");
 let proxyProcess: Subprocess;
 const TEST_PORT = 13128 + Math.floor(Math.random() * 1000);
 const BASE_URL = `http://localhost:${TEST_PORT}`;
