@@ -124,8 +124,11 @@ else
 # Check NSG by examining agent logs for proxy connectivity evidence
 # If agent can talk to the proxy, the private subnet NSG is working correctly
 # (agent can only reach proxy:3128, not the internet directly)
-info "  Fetching agent logs (will retry up to 60s if empty)..."
+info "  Fetching agent logs (will retry up to 180s if empty)..."
 AGENT_LOG=$(wait_for_agent_logs)
+
+# Pre-fetch proxy logs for fallback checks (agent logs may be unavailable due to Azure issues)
+PROXY_LOG=$(proxy_logs)
 
 if [[ -n "$AGENT_LOG" ]]; then
   pass "Direct internet access blocked (agent only reaches proxy via NSG)"
@@ -143,6 +146,7 @@ fi
 # --------------------------------------------------------------------------
 info "Test 3: Proxy is responding to requests..."
 
+# Refresh proxy logs (may have new entries since initial fetch)
 PROXY_LOG=$(proxy_logs)
 
 if [[ -n "$PROXY_LOG" && ("$PROXY_LOG" == *"listening"* || "$PROXY_LOG" == *"started"* || "$PROXY_LOG" == *"ready"* || "$PROXY_LOG" == *"proxy"*) ]]; then
