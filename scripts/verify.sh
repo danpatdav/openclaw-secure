@@ -47,14 +47,15 @@ echo ""
 
 # Helper: check proxy container logs for evidence of behavior
 proxy_logs() {
-  az container logs \
+  timeout 10 az container logs \
     --resource-group "$RESOURCE_GROUP" \
     --name "$PROXY_CONTAINER" 2>/dev/null || echo ""
 }
 
 # Helper: check agent container logs for evidence of behavior (with retry)
+# Timeout after 10s — az container logs can hang indefinitely on Azure InternalServerError
 agent_logs() {
-  az container logs \
+  timeout 10 az container logs \
     --resource-group "$RESOURCE_GROUP" \
     --name "$AGENT_CONTAINER" 2>/dev/null || echo ""
 }
