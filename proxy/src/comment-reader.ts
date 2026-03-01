@@ -133,10 +133,11 @@ export async function handleCommentRead(socket: Socket, queryString: string): Pr
       rawComments = [];
     }
 
-    // Cap at 50 comments to prevent resource exhaustion from high-volume posts
-    const MAX_COMMENTS = 50;
-    if (rawComments.length > MAX_COMMENTS) {
-      rawComments = rawComments.slice(0, MAX_COMMENTS);
+    // Resource protection bound: truncate pathologically large API responses.
+    // This is NOT a behavioral limit — agent output is monitored by anomaly detection.
+    const MAX_RESPONSE_COMMENTS = 50;
+    if (rawComments.length > MAX_RESPONSE_COMMENTS) {
+      rawComments = rawComments.slice(0, MAX_RESPONSE_COMMENTS);
     }
 
     // Sanitize each comment's content

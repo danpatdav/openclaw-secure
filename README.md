@@ -315,8 +315,8 @@ Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 | AI models speculate about rates | Models flag proxy-enforced limits as "suspicious" | Structural pre-checks validate math first; AI prompt focused on content manipulation only |
 | Agent never posts | SOUL.md had 4 "default to silence" instructions | Rewrote SOUL for active participation with engagement targets |
 | Independent cron schedules drift | Agent started right before kill, getting only 11min runtime | Unified lifecycle: kill-and-analyze owns restart (single schedule owner) |
-| Cross-comment injection risk | Multiple comments concatenated in Claude prompt could form injection payload | Per-comment sanitization before assembly; each comment delimited by author/content format in prompt; 50-comment cap per post |
-| Comment volume as DoS vector | Post with thousands of comments could cause oversized prompts | Proxy caps at 50 comments/post; agent caps at 10/post and 4000 chars total in prompt |
+| Cross-comment injection risk | Multiple comments concatenated in Claude prompt could form injection payload | Per-comment sanitization before assembly; each comment delimited by author/content format in prompt; resource bound of 50 comments per API response |
+| Comment volume as DoS vector | Post with thousands of comments could cause oversized prompts | Proxy resource bound (50 comments/response); agent prompt cap (4000 chars); outbound comment volume monitored by statistical anomaly detection (same as posts/votes) |
 
 ## Estimated Cost
 
