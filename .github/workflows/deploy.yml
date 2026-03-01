@@ -86,11 +86,11 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Run tests before deploy
+      - name: Run all proxy tests (unit + e2e)
         working-directory: proxy
         run: |
           bun install
-          bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts src/indirect-injection.test.ts src/behavioral-drift.test.ts src/redos.test.ts src/comment.test.ts src/comment-reader.test.ts
+          bun test
 
       - name: Create resource group
         run: |

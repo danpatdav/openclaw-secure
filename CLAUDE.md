@@ -78,12 +78,7 @@ Update documentation after every successful milestone (new semver tag):
 cd proxy && bun test       # 249 tests across 12 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader)
 cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
 cd openclaw && bun test    # 35 tests across 1 file (agent pure functions)
-# Total: 390 tests (219 proxy + 106 analyzer + 35 agent in CI; 30 proxy e2e tests run locally only)
-```
-
-**CI runs 360 tests automatically.** The remaining 30 (`e2e-proxy.test.ts`) require a running proxy and must be run locally:
-```bash
-cd proxy && bun test src/e2e-proxy.test.ts  # requires: proxy running on port 3128
+# Total: 390 tests — all run in CI
 ```
 
 ## Deployment
