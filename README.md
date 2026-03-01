@@ -10,10 +10,11 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **MVP1** | Read-only Moltbook observation | Complete |
 | **MVP1.5** | Semi-persistent observation + dual-model audit | Complete |
 | **MVP2** | Controlled posting with rate limits | Complete |
-| **MVP3** | Stable operation — structural pre-checks, calibrated verdicts | **Live** |
+| **MVP3** | Stable operation — structural pre-checks, calibrated verdicts | Complete |
+| **MVP3.1** | Comment read-through — agent reads, sanitizes, and responds to comments | **Live** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
-**Tests:** 321 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
+**Tests:** 390 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
 
 ## Architecture
 
@@ -26,8 +27,10 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 │  │  ┌──────────────┐       │  │  ┌──────────────┐       │            │
 │  │  │ DanielsClaw  │──3128─┼──┼─▶│ Bun Proxy    │──443──▶ Internet   │
 │  │  │ (4hr loop)   │       │  │  │ /post /vote  │       │  (reads)   │
-│  │  │              │──POST─┼──┼─▶│ /memory API  │───────▶ Moltbook   │
-│  │  └──────────────┘       │  │  └──────┬───────┘       │  (writes)  │
+│  │  │              │──POST─┼──┼─▶│ /comment     │───────▶ Moltbook   │
+│  │  │              │──GET──┼──┼─▶│ /comments    │       │  (r/w)     │
+│  │  │              │──POST─┼──┼─▶│ /memory API  │       │            │
+│  │  └──────────────┘       │  │  └──────┬───────┘       │            │
 │  │  NSG: proxy:3128 only   │  │  NSG: HTTPS out         │            │
 │  └─────────────────────────┘  └────────┼────────────────┘            │
 │                                        │                             │
@@ -47,12 +50,13 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key isolation:** Agent reads Moltbook via CONNECT tunnel (proxy allowlist) and writes through proxy `/post` and `/vote` endpoints (schema-validated, anomaly-monitored). The Moltbook API key for authenticated POSTs lives on the **proxy**, not the agent — the agent holds only its Anthropic key (Claude analysis) and a Moltbook key scoped to feed reads. Analyzer has direct Blob access but NO access to Moltbook or the agent's runtime. OpenAI key is only in the analyzer container, never the agent.
+**Key isolation:** Agent reads Moltbook feed via CONNECT tunnel (proxy allowlist) and reads comments via proxy read-through endpoint (`GET /comments` — proxy fetches from Moltbook, sanitizes each comment through injection detector, returns clean data). Writes go through proxy `/post`, `/vote`, and `/comment` endpoints (schema-validated, anomaly-monitored). The Moltbook API key for authenticated requests lives on the **proxy**, not the agent — the agent holds only its Anthropic key (Claude analysis) and a Moltbook key scoped to feed reads. Analyzer has direct Blob access but NO access to Moltbook or the agent's runtime. OpenAI key is only in the analyzer container, never the agent.
 
 **Allowed outbound domains (agent):**
 - `api.anthropic.com` — Claude API (analysis)
 - `www.moltbook.com` — Feed reading (CONNECT tunnel)
-- Posting/voting via proxy `/post` and `/vote` endpoints (proxy holds write-scoped Moltbook key)
+- Posting/voting/commenting via proxy `/post`, `/vote`, `/comment` endpoints (proxy holds write-scoped Moltbook key)
+- Comment reading via proxy read-through `/comments` endpoint (proxy fetches, sanitizes per-comment, returns clean data)
 
 ## Security Model
 
@@ -62,7 +66,8 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **Application (Proxy)** | Domain allowlist + method restrictions | Only whitelisted domains/methods pass through |
 | **Application (Proxy)** | Prompt injection sanitizer (outbound) | Detects/replaces injection patterns in **agent outbound posts** before forwarding to Moltbook |
 | **Application (Proxy)** | Statistical anomaly detection | Observe-only: rolling mean + 2σ threshold over 50-cycle window flags unusual activity (no blocking) |
-| **Application (Proxy)** | Content validation | Zod schema: max 500 chars, injection scanning on outbound posts |
+| **Application (Proxy)** | Comment read-through sanitization | Per-comment injection scanning on inbound comments before agent sees them (capped at 50 comments/post) |
+| **Application (Proxy)** | Content validation | Zod schema: max 500 chars, injection scanning on outbound posts and comments |
 | **Memory (Proxy)** | Zod schema validation | All memory writes validated — no freeform text, fixed enums only |
 | **Memory (Blob)** | Append-only + 1MB size cap | Memory blobs are never overwritten, size-aware pruning keeps payloads under 900KB |
 | **Audit (Analyzer)** | Structural pre-checks + dual-model analysis | Deterministic math validation first; AI consensus at 0.8+ confidence required to block |
@@ -76,11 +81,11 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 
 ### Agent Run Cycle (4 hours)
 
-1. Agent loads last approved memory from proxy (`GET /memory/latest`)
-2. Agent loops: fetch Moltbook feed → deduplicate posts → analyze with Claude → Claude recommends actions (replies, upvotes) → execute actions through proxy `/post` and `/vote` endpoints → save memory
+1. Agent loads last approved memory from proxy (`GET /memory/latest`), including tracked commented posts
+2. Agent loops: fetch Moltbook feed → deduplicate posts → fetch comments on previously-commented posts (check for replies) → fetch comments on new posts (understand context) → analyze with Claude (feed + comment context) → Claude recommends actions (replies, upvotes, comments) → execute through proxy endpoints → save memory
 3. Agent normalizes Claude's labels to valid schema enums before memory save (e.g., "tech" → "technical", "mixed" → "neutral")
-4. Memory saves go through proxy (`POST /memory`) → Zod schema validation → Blob Storage. Size-aware pruning trims oldest `post_seen` entries to stay under 900KB
-5. Proxy records activity per 5-minute cycle; statistical anomaly detection (2σ, observe-only) flags unusual posting/voting patterns without blocking
+4. Memory saves go through proxy (`POST /memory`) → Zod schema validation → Blob Storage. Size-aware pruning trims oldest `post_seen` entries to stay under 900KB. Comments tracked as `comment_made` entries for conversation continuity
+5. Proxy records activity per 5-minute cycle; statistical anomaly detection (2σ, observe-only) flags unusual posting/voting/commenting patterns without blocking
 6. After 4 hours, **kill-and-analyze** workflow stops the agent
 
 ### Analysis & Restart Cycle (~15 minutes)
@@ -108,13 +113,14 @@ Memory files are strictly validated — no freeform text fields:
   "entries": [
     { "type": "post_seen", "post_id": "str", "timestamp": "ISO8601", "topic_label": "enum", "sentiment": "enum" },
     { "type": "post_made", "post_id": "str", "thread_id": "str", "timestamp": "ISO8601", "action": "enum", "content": "str", "status": "enum" },
+    { "type": "comment_made", "post_id": "str", "comment_id": "str?", "parent_id": "str?", "timestamp": "ISO8601", "content": "str?" },
     { "type": "thread_tracked", "thread_id": "str", "topic_label": "enum", "first_seen": "ISO8601", "last_interaction": "ISO8601" }
   ],
-  "stats": { "posts_read": 0, "posts_made": 0, "upvotes": 0, "threads_tracked": 0 }
+  "stats": { "posts_read": 0, "posts_made": 0, "upvotes": 0, "comments": 0, "threads_tracked": 0 }
 }
 ```
 
-**Fixed enums:** `topic_label` (Claude-assigned per post, not hardcoded — e.g., ai_safety, agent_design, moltbook_meta, social, technical), `sentiment` (positive, neutral, negative), `action` (reply, new_post, upvote), `status` (sent, rate_limited, failed).
+**Fixed enums:** `topic_label` (Claude-assigned per post, not hardcoded — e.g., ai_safety, agent_design, moltbook_meta, social, technical), `sentiment` (positive, neutral, negative), `action` (reply, new_post, upvote, comment), `status` (sent, rate_limited, failed).
 
 ## Quick Start
 
@@ -231,12 +237,13 @@ infra/
 
 proxy/                         — Bun HTTP proxy (security layer)
   src/
-    index.ts                   — Proxy server + TCP body buffering + routing for /post, /vote, /memory
+    index.ts                   — Proxy server + TCP body buffering + routing for /post, /vote, /comment, /comments, /memory
     allowlist.ts               — Domain + method allowlist enforcement
     sanitizer.ts               — Prompt injection pattern detection
-    memory-schema.ts           — Zod schema for memory validation
-    post-handler.ts            — /post and /vote endpoints with statistical anomaly detection
-    post-schema.ts             — Zod schemas for post/vote request validation
+    comment-reader.ts          — Comment read-through: fetch from Moltbook, per-comment sanitization, clean response
+    memory-schema.ts           — Zod schema for memory validation (post_seen, post_made, comment_made, thread_tracked)
+    post-handler.ts            — /post, /vote, /comment endpoints with statistical anomaly detection
+    post-schema.ts             — Zod schemas for post/vote/comment request validation
     memory-store.ts            — /memory API endpoint + Blob Storage client
     logger.ts                  — Structured JSONL logging
     types.ts                   — TypeScript type definitions
@@ -248,7 +255,7 @@ proxy/                         — Bun HTTP proxy (security layer)
     action-allowlist.json      — MVP2: endpoint-level POST rules
 
 openclaw/                      — Agent container
-  agent.mjs                    — Semi-persistent loop (4hr, 5-min cycles, posting logic, Claude action recommendations, schema normalization, size-aware pruning)
+  agent.mjs                    — Semi-persistent loop (4hr, 5-min cycles, posting/commenting logic, comment read-back, Claude action recommendations, schema normalization, size-aware pruning)
   Dockerfile                   — Hardened container (non-root, tini init, read-only SOUL)
   package.json                 — Dependencies (undici for proxy support)
   openclaw.json                — Hardened agent config (memory off, tools denied)
@@ -308,6 +315,8 @@ Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 | AI models speculate about rates | Models flag proxy-enforced limits as "suspicious" | Structural pre-checks validate math first; AI prompt focused on content manipulation only |
 | Agent never posts | SOUL.md had 4 "default to silence" instructions | Rewrote SOUL for active participation with engagement targets |
 | Independent cron schedules drift | Agent started right before kill, getting only 11min runtime | Unified lifecycle: kill-and-analyze owns restart (single schedule owner) |
+| Cross-comment injection risk | Multiple comments concatenated in Claude prompt could form injection payload | Per-comment sanitization before assembly; each comment delimited by author/content format in prompt; 50-comment cap per post |
+| Comment volume as DoS vector | Post with thousands of comments could cause oversized prompts | Proxy caps at 50 comments/post; agent caps at 10/post and 4000 chars total in prompt |
 
 ## Estimated Cost
 

@@ -133,6 +133,12 @@ export async function handleCommentRead(socket: Socket, queryString: string): Pr
       rawComments = [];
     }
 
+    // Cap at 50 comments to prevent resource exhaustion from high-volume posts
+    const MAX_COMMENTS = 50;
+    if (rawComments.length > MAX_COMMENTS) {
+      rawComments = rawComments.slice(0, MAX_COMMENTS);
+    }
+
     // Sanitize each comment's content
     const sanitizedComments: SanitizedComment[] = [];
     for (const raw of rawComments) {
