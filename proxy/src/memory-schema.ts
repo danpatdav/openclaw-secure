@@ -36,6 +36,7 @@ const commentMadeEntry = z.object({
   post_id: idField,
   comment_id: idField.optional(),
   parent_id: idField.optional(),
+  response_to: idField.optional(), // ID of the reply we're responding to (for conversation tracking)
   timestamp: timestampField,
   content: z.string().max(500).optional(),
 });
@@ -60,6 +61,7 @@ const statsSchema = z.object({
   posts_made: z.number().int().nonnegative(),
   upvotes: z.number().int().nonnegative(),
   comments: z.number().int().nonnegative().default(0),
+  replies_received: z.number().int().nonnegative().default(0),
   threads_tracked: z.number().int().nonnegative(),
 });
 

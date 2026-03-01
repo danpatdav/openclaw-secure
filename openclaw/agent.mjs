@@ -37,9 +37,12 @@ const trackedThreads = new Map();
 const postsMade = [];
 const commentsMade = []; // comment_made entries (separate from post_made)
 const myCommentedPosts = new Set(); // post IDs we've commented on (for response checking)
+const myCommentIds = new Map(); // comment_id → post_id (for detecting replies to our comments)
+const respondedReplyIds = new Set(); // reply IDs we've already responded to
 let postsReadCount = 0;
 let upvotesCount = 0;
 let commentsCount = 0;
+let repliesReceivedCount = 0;
 let checkpointNum = 0;
 
 // --- Schema Normalization ---
@@ -120,6 +123,12 @@ async function loadMemory() {
         });
       } else if (entry.type === "comment_made") {
         myCommentedPosts.add(entry.post_id);
+        if (entry.comment_id) {
+          myCommentIds.set(entry.comment_id, entry.post_id);
+        }
+        if (entry.response_to) {
+          respondedReplyIds.add(entry.response_to);
+        }
       } else if (entry.type === "post_made" && entry.action === "comment") {
         // Backward compat: older entries stored comments as post_made with action: "comment"
         myCommentedPosts.add(entry.post_id);
@@ -129,6 +138,8 @@ async function loadMemory() {
       seen_posts: seenPostIds.size,
       tracked_threads: trackedThreads.size,
       commented_posts: myCommentedPosts.size,
+      own_comments: myCommentIds.size,
+      responded_replies: respondedReplyIds.size,
     });
   } catch (err) {
     log("warn", "Failed to load memory — starting fresh", { error: err.message });
@@ -191,6 +202,7 @@ function buildMemoryPayload() {
       posts_made: postsMade.length,
       upvotes: upvotesCount,
       comments: commentsCount,
+      replies_received: repliesReceivedCount,
       threads_tracked: trackedThreads.size,
     },
   };
@@ -446,6 +458,21 @@ async function commentOnPost(postId, content, parentId) {
   }
 }
 
+// --- Reply Detection ---
+
+/**
+ * Detect which comments in a thread are replies to the agent's own comments.
+ * Pure function — takes comments array and a Map of our comment_id → post_id.
+ * Returns array of { comment, isReply, isResponded } objects.
+ */
+function detectReplies(comments, ownCommentIds, respondedIds) {
+  return comments.map(c => ({
+    comment: c,
+    isReply: !!(c.parent_id && ownCommentIds.has(String(c.parent_id))),
+    isResponded: !!(c.id && respondedIds.has(String(c.id))),
+  }));
+}
+
 // --- Comment Read-Through ---
 
 async function fetchPostComments(postId) {
@@ -515,14 +542,26 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
 
     if (commentResults.length > 0) {
       commentContext = "\n\n--- EXISTING COMMENTS ON POSTS YOU'VE ENGAGED WITH ---\n";
+      let unrespondedCount = 0;
       for (const r of commentResults) {
+        const annotated = detectReplies(r.comments, myCommentIds, respondedReplyIds);
         commentContext += `\nPost ${r.post_id} (${r.count} comments):\n`;
-        for (const c of r.comments.slice(0, 10)) {
+        for (const { comment: c, isReply, isResponded } of annotated.slice(0, 10)) {
           const sanitizedTag = c.sanitized ? " [SANITIZED]" : "";
-          commentContext += `  - ${c.author}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
+          const replyTag = isReply ? (isResponded ? " [REPLY TO YOU - ALREADY RESPONDED]" : " [REPLY TO YOU - NEW]") : "";
+          if (isReply && !isResponded) unrespondedCount++;
+          commentContext += `  - ${c.author}${replyTag}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
+        }
+        // Track replies for stats
+        for (const { isReply } of annotated) {
+          if (isReply) repliesReceivedCount++;
         }
       }
-      commentContext += "\nCheck if anyone replied to your previous comments and respond if appropriate.\n";
+      if (unrespondedCount > 0) {
+        commentContext += `\nYou have ${unrespondedCount} new reply/replies to your comments. Consider responding to continue the conversation.\n`;
+      } else {
+        commentContext += "\nNo new replies to your comments.\n";
+      }
     }
   }
 
@@ -570,7 +609,7 @@ Output your analysis as structured JSON:
   "safety_notes": ["any concerns"],
   "actions": {
     "posts": [{"content": "your reply text", "thread_id": "post-id-to-reply-to"}],
-    "comments": [{"post_id": "post-id", "content": "your comment text", "parent_id": "optional-comment-id-to-reply-to"}],
+    "comments": [{"post_id": "post-id", "content": "your comment text", "parent_id": "optional-comment-id-to-reply-to", "response_to": "optional-id-of-reply-you-are-responding-to"}],
     "upvotes": ["post_id_1"],
     "skip_reason": "nothing warranting a response"
   }
@@ -594,7 +633,7 @@ Rules for commenting:
 - Include post_id to comment on a post, and optional parent_id to reply to a specific comment
 - Prefer comments over posts when engaging in an existing conversation
 - Prioritize responding to replies on your own previous comments over starting new threads
-- If someone replied to your comment, respond to continue the conversation (use their comment's id as parent_id)
+- If someone replied to your comment (marked [REPLY TO YOU - NEW]), respond to continue the conversation (use their comment's id as parent_id, and set response_to to their comment's id)
 - Max 3 comments per cycle
 - Keep each comment under 500 characters
 - Comments are better for short reactions, follow-up questions, and building on others' points
@@ -749,15 +788,22 @@ Rules for commenting:
       if (result.ok) {
         commentsCount++;
         const commentId = result.data?.id || result.data?.comment_id || `unknown-${Date.now()}`;
+        // Determine if this comment is a response to a reply (parent_id is one of our comment IDs that received a reply)
+        const responseTo = comment.response_to ? String(comment.response_to) : undefined;
         commentsMade.push({
           type: "comment_made",
           post_id: String(comment.post_id),
           comment_id: String(commentId),
           parent_id: comment.parent_id ? String(comment.parent_id) : undefined,
+          response_to: responseTo,
           timestamp: new Date().toISOString(),
           content: comment.content,
         });
         myCommentedPosts.add(String(comment.post_id));
+        myCommentIds.set(String(commentId), String(comment.post_id));
+        if (responseTo) {
+          respondedReplyIds.add(responseTo);
+        }
       } else if (result.status === 429) {
         commentRateLimited = true;
         // Still record the attempt as post_made for backward compat audit trail
@@ -888,12 +934,15 @@ export {
   buildMemoryPayload,
   normalizeSentiment,
   normalizeTopic,
+  detectReplies,
   seenPostIds,
   postLabels,
   trackedThreads,
   postsMade,
   commentsMade,
   myCommentedPosts,
+  myCommentIds,
+  respondedReplyIds,
   VALID_SENTIMENTS,
   VALID_TOPICS,
   TOPIC_ALIASES,

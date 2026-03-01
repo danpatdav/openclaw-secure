@@ -36,10 +36,14 @@ const {
   buildMemoryPayload,
   normalizeSentiment,
   normalizeTopic,
+  detectReplies,
   seenPostIds,
   postLabels,
   trackedThreads,
   postsMade,
+  commentsMade,
+  myCommentIds,
+  respondedReplyIds,
   VALID_SENTIMENTS,
   VALID_TOPICS,
   TOPIC_ALIASES,
@@ -54,6 +58,9 @@ function resetState() {
   postLabels.clear();
   trackedThreads.clear();
   postsMade.length = 0;
+  commentsMade.length = 0;
+  myCommentIds.clear();
+  respondedReplyIds.clear();
 }
 
 // =============================================================================
@@ -338,7 +345,129 @@ describe("buildMemoryPayload", () => {
 });
 
 // =============================================================================
-// F. Topic/Sentiment Enum Completeness
+// F. detectReplies — reply detection pure function
+// =============================================================================
+
+describe("detectReplies", () => {
+  it("returns empty array for empty comments", () => {
+    const result = detectReplies([], new Map(), new Set());
+    expect(result).toEqual([]);
+  });
+
+  it("marks comment as reply when parent_id matches our comment", () => {
+    const ownIds = new Map([["c1", "post-1"]]);
+    const comments = [
+      { id: "r1", author: "alice", content: "Great point!", parent_id: "c1" },
+    ];
+    const result = detectReplies(comments, ownIds, new Set());
+    expect(result.length).toBe(1);
+    expect(result[0].isReply).toBe(true);
+    expect(result[0].isResponded).toBe(false);
+  });
+
+  it("does not mark comment as reply when parent_id is unknown", () => {
+    const ownIds = new Map([["c1", "post-1"]]);
+    const comments = [
+      { id: "r1", author: "alice", content: "Random comment", parent_id: "c999" },
+    ];
+    const result = detectReplies(comments, ownIds, new Set());
+    expect(result[0].isReply).toBe(false);
+  });
+
+  it("does not mark comment as reply when no parent_id", () => {
+    const ownIds = new Map([["c1", "post-1"]]);
+    const comments = [
+      { id: "r1", author: "alice", content: "Top-level comment" },
+    ];
+    const result = detectReplies(comments, ownIds, new Set());
+    expect(result[0].isReply).toBe(false);
+  });
+
+  it("marks reply as responded when id is in respondedIds", () => {
+    const ownIds = new Map([["c1", "post-1"]]);
+    const responded = new Set(["r1"]);
+    const comments = [
+      { id: "r1", author: "alice", content: "Nice!", parent_id: "c1" },
+    ];
+    const result = detectReplies(comments, ownIds, responded);
+    expect(result[0].isReply).toBe(true);
+    expect(result[0].isResponded).toBe(true);
+  });
+
+  it("handles mixed comments correctly", () => {
+    const ownIds = new Map([["c1", "post-1"], ["c2", "post-2"]]);
+    const responded = new Set(["r1"]);
+    const comments = [
+      { id: "r1", author: "alice", content: "Reply 1", parent_id: "c1" },      // reply, responded
+      { id: "r2", author: "bob", content: "Reply 2", parent_id: "c2" },        // reply, not responded
+      { id: "r3", author: "carol", content: "Random", parent_id: "c999" },     // not a reply
+      { id: "r4", author: "dave", content: "Top-level" },                       // not a reply
+    ];
+    const result = detectReplies(comments, ownIds, responded);
+    expect(result[0].isReply).toBe(true);
+    expect(result[0].isResponded).toBe(true);
+    expect(result[1].isReply).toBe(true);
+    expect(result[1].isResponded).toBe(false);
+    expect(result[2].isReply).toBe(false);
+    expect(result[3].isReply).toBe(false);
+  });
+
+  it("converts parent_id to string for comparison", () => {
+    const ownIds = new Map([["123", "post-1"]]);
+    const comments = [
+      { id: "r1", author: "alice", content: "Reply", parent_id: 123 },
+    ];
+    const result = detectReplies(comments, ownIds, new Set());
+    expect(result[0].isReply).toBe(true);
+  });
+});
+
+// =============================================================================
+// G. buildMemoryPayload — replies_received in stats
+// =============================================================================
+
+describe("buildMemoryPayload replies tracking", () => {
+  beforeEach(resetState);
+
+  it("includes replies_received in stats", () => {
+    const payload = buildMemoryPayload();
+    expect(payload.stats.replies_received).toBeDefined();
+    expect(payload.stats.replies_received).toBe(0);
+  });
+
+  it("includes comment_made entries with response_to", () => {
+    commentsMade.push({
+      type: "comment_made",
+      post_id: "post-1",
+      comment_id: "c1",
+      parent_id: "p1",
+      response_to: "reply-1",
+      timestamp: "2026-03-01T00:00:00Z",
+      content: "My response",
+    });
+    const payload = buildMemoryPayload();
+    const comment = payload.entries.find(e => e.type === "comment_made");
+    expect(comment).toBeDefined();
+    expect(comment.response_to).toBe("reply-1");
+  });
+
+  it("includes comment_made entries without response_to", () => {
+    commentsMade.push({
+      type: "comment_made",
+      post_id: "post-1",
+      comment_id: "c1",
+      timestamp: "2026-03-01T00:00:00Z",
+      content: "Just a comment",
+    });
+    const payload = buildMemoryPayload();
+    const comment = payload.entries.find(e => e.type === "comment_made");
+    expect(comment).toBeDefined();
+    expect(comment.response_to).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// H. Topic/Sentiment Enum Completeness
 // =============================================================================
 
 describe("enum completeness", () => {

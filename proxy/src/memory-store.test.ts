@@ -147,4 +147,73 @@ describe("memory schema validation", () => {
     const result = validateMemory(validMemory);
     expect(result.success).toBe(true);
   });
+
+  test("accepts comment_made with response_to field", () => {
+    const valid = {
+      ...validMemory,
+      entries: [{
+        type: "comment_made",
+        post_id: "post-abc",
+        comment_id: "comment-xyz",
+        parent_id: "comment-parent",
+        response_to: "reply-id-123",
+        timestamp: "2026-03-01T00:00:00Z",
+        content: "Thanks for the reply!",
+      }],
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts comment_made without response_to field", () => {
+    const valid = {
+      ...validMemory,
+      entries: [{
+        type: "comment_made",
+        post_id: "post-abc",
+        comment_id: "comment-xyz",
+        timestamp: "2026-03-01T00:00:00Z",
+      }],
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects comment_made with invalid response_to format", () => {
+    const invalid = {
+      ...validMemory,
+      entries: [{
+        type: "comment_made",
+        post_id: "post-abc",
+        response_to: "has spaces!",
+        timestamp: "2026-03-01T00:00:00Z",
+      }],
+    };
+    const result = validateMemory(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  test("accepts stats with replies_received field", () => {
+    const valid = {
+      ...validMemory,
+      stats: { posts_read: 10, posts_made: 1, upvotes: 3, comments: 5, replies_received: 2, threads_tracked: 2 },
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("defaults replies_received to 0 when not provided", () => {
+    // Existing stats without replies_received should still validate
+    const result = validateMemory(validMemory);
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects negative replies_received", () => {
+    const invalid = {
+      ...validMemory,
+      stats: { ...validMemory.stats, replies_received: -1 },
+    };
+    const result = validateMemory(invalid);
+    expect(result.success).toBe(false);
+  });
 });
