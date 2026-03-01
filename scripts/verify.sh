@@ -126,7 +126,7 @@ else
 # If agent can talk to the proxy, the private subnet NSG is working correctly
 # (agent can only reach proxy:3128, not the internet directly)
 info "  Fetching agent logs (will retry up to 180s if empty)..."
-AGENT_LOG=$(wait_for_agent_logs)
+AGENT_LOG=$(wait_for_agent_logs) || true
 
 # Pre-fetch proxy logs for fallback checks (agent logs may be unavailable due to Azure issues)
 PROXY_LOG=$(proxy_logs)
