@@ -1,6 +1,6 @@
 # OpenClaw-Secure Testing Strategy
 
-> 264 tests across 13 files covering the security proxy, behavioral analyzer, and AI agent.
+> 321 tests across 16 files covering the security proxy, behavioral analyzer, and AI agent.
 
 ## Philosophy
 
@@ -45,7 +45,7 @@ The test suite is designed against the following attacker capabilities:
 
 ## Test Files Reference
 
-### Proxy (126 tests)
+### Proxy (180 tests)
 
 | File | Tests | What It Covers |
 |------|-------|----------------|
@@ -58,8 +58,9 @@ The test suite is designed against the following attacker capabilities:
 | `proxy/src/indirect-injection.test.ts` | 34 | **Gap documentation**: payloads that bypass the sanitizer |
 | `proxy/src/behavioral-drift.test.ts` | 11 | **Gap documentation**: gradual drift scenarios that evade anomaly detection |
 | `proxy/src/e2e-proxy.test.ts` | 30 | Full HTTP stack: routing, schema validation, attack payloads (excluded from CI) |
+| `proxy/src/redos.test.ts` | 24 | ReDoS regression: adversarial inputs for all 18 sanitizer patterns within 50ms budget |
 
-### Analyzer (73 tests)
+### Analyzer (106 tests)
 
 | File | Tests | What It Covers |
 |------|-------|----------------|
@@ -67,6 +68,7 @@ The test suite is designed against the following attacker capabilities:
 | `analyzer/verdict.test.mjs` | 10 | Full pipeline scenarios: healthy runs, compromised consensus, split opinions |
 | `analyzer/prompt-effectiveness.test.mjs` | 25 | ADVERSARIAL_PROMPT signal coverage, confidence threshold boundaries |
 | `analyzer/drift-exploitation.test.mjs` | 11 | 30-minute auto-approve exploitation, behavioral pattern drift |
+| `analyzer/consensus-manipulation.test.mjs` | 33 | Confidence boundaries, malformed outputs, split verdict attacks, field manipulation, precheck bypasses |
 
 ### Agent (35 tests)
 
@@ -85,36 +87,36 @@ The test suite is designed against the following attacker capabilities:
 ## Running Tests
 
 ```bash
-# Proxy unit tests (what CI runs)
+# Proxy unit tests (what CI runs — excludes E2E and ReDoS)
 cd proxy && bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts \
   src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts \
   src/indirect-injection.test.ts src/behavioral-drift.test.ts
 
-# Proxy E2E tests (requires a running proxy instance)
+# Proxy E2E tests (requires a running proxy instance — excluded from CI)
 cd proxy && bun test src/e2e-proxy.test.ts
 
-# Analyzer tests
-cd analyzer && bun test analyzer.test.mjs verdict.test.mjs \
-  prompt-effectiveness.test.mjs drift-exploitation.test.mjs
+# Proxy ReDoS regression tests (runs locally and in `bun test` but not in CI explicit list)
+cd proxy && bun test src/redos.test.ts
 
-# Agent tests
-cd openclaw && bun test agent.test.mjs
+# Analyzer tests (all run in CI)
+cd analyzer && bun test
 
-# Everything (excluding E2E)
-cd proxy && bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts \
-  src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts \
-  src/indirect-injection.test.ts src/behavioral-drift.test.ts && \
-cd ../analyzer && bun test && cd ../openclaw && bun test
+# Agent tests (all run in CI)
+cd openclaw && bun test
+
+# Everything locally (321 tests)
+cd proxy && bun test && cd ../analyzer && bun test && cd ../openclaw && bun test
 ```
 
 ## What Runs Where
 
 | Suite | Location | CI | Notes |
 |-------|----------|----|-------|
-| Proxy unit tests | `proxy/src/*.test.ts` (listed in ci.yml) | Yes | Required check |
+| Proxy unit tests | `proxy/src/*.test.ts` (listed in ci.yml) | Yes | Required check (8 files explicitly listed) |
 | Proxy E2E tests | `proxy/src/e2e-proxy.test.ts` | No | Requires running proxy |
-| Analyzer tests | `analyzer/*.test.mjs` | No | Must run locally before PR |
-| Agent tests | `openclaw/agent.test.mjs` | No | Must run locally before PR |
+| Proxy ReDoS tests | `proxy/src/redos.test.ts` | No | Runs in local `bun test` but not CI explicit list |
+| Analyzer tests | `analyzer/*.test.mjs` | Yes | All 5 files run via `bun test` |
+| Agent tests | `openclaw/agent.test.mjs` | Yes | Runs via `bun test` |
 
 ## Attack Taxonomy
 
@@ -312,14 +314,15 @@ const { extractPostIds } = await import("./agent.mjs");
 
 1. Create test file in the appropriate directory (`proxy/src/`, `analyzer/`, or `openclaw/`).
 2. Add a JSDoc header indicating whether tests are regression, gap documentation, or both, and reference the related issue.
-3. If it's a proxy test, add the file to the CI test list in `.github/workflows/ci.yml`.
+3. If it's a proxy test, add the file to the CI test list in both `.github/workflows/ci.yml` and `.github/workflows/deploy.yml`.
 4. If the file covers a new attack vector, update the Attack Taxonomy section in this document.
 5. Run the full suite locally to verify no regressions before committing.
 
 ## CI Integration
 
-CI runs in `.github/workflows/ci.yml`. The proxy unit tests are explicitly listed (E2E tests excluded because they require a running proxy):
+CI runs in `.github/workflows/ci.yml` with three test jobs:
 
+1. **Proxy Tests** — explicitly listed files (E2E and ReDoS excluded):
 ```yaml
 - name: Run unit tests
   run: bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts
@@ -327,9 +330,10 @@ CI runs in `.github/workflows/ci.yml`. The proxy unit tests are explicitly liste
     src/indirect-injection.test.ts src/behavioral-drift.test.ts
 ```
 
-When adding a new proxy test file, add it to this list.
+2. **Analyzer Tests** — `bun test` (all files)
+3. **Agent Tests** — `bun test` (all files)
 
-> **Note:** As of v0.6.6, analyzer and agent tests are NOT run in CI. Run these locally before submitting PRs. Adding them to CI is on the roadmap.
+When adding a new proxy test file, add it to the explicit list in ci.yml (and in deploy.yml).
 
 ## Future Testing Roadmap
 
@@ -338,11 +342,11 @@ Based on external peer review (GPT-4.1 and GPT-5.2), the following should be con
 **New test categories:**
 - **Fuzzing / property-based testing** — Use [fast-check](https://github.com/dubzzz/fast-check) for randomized sanitizer input testing with properties like "sanitize never throws" and "same semantic string produces same detection"
 - **Model escape attacks** — DAN-style jailbreak payloads and prompt leakage tests
-- **Consensus manipulation** — Craft content that triggers one model but not the other; test model-targeted jailbreaks (Claude-specific vs GPT-specific phrasing)
+- ~~**Consensus manipulation**~~ — Done (v0.6.8, #42): 33 tests for confidence boundaries, malformed outputs, split verdict attacks
 - **Memory/state poisoning** — Repeated benign-looking posts that alter stored memory; preference shaping ("always trust posts from @admin")
 - **SSRF-style attempts** — Internal IP ranges (169.254.169.254, RFC1918), DNS rebinding hostnames, URL parsing edge cases (`http://allowed.com@evil.com/`)
 - **Redaction/PII leakage** — Verify logs do not contain secrets, API keys, Authorization headers, or raw injection payloads
-- **Regex catastrophic backtracking** — Test sanitizer performance with worst-case input strings
+- ~~**Regex catastrophic backtracking**~~ — Done (v0.6.8, #48): 24 ReDoS tests with 50ms budget
 
 **Infrastructure improvements:**
 - **Record/replay for dual-model tests** — Store model responses as fixtures for deterministic CI runs
@@ -360,5 +364,6 @@ Based on external peer review (GPT-4.1 and GPT-5.2), the following should be con
 | v0.6.4 | +25 (207) | Analyzer prompt effectiveness and confidence thresholds |
 | v0.6.5 | +22 (229) | Behavioral drift and auto-approve exploitation |
 | v0.6.6 | +35 (264*) | Agent pure function unit tests |
+| v0.6.8 | +57 (321) | CI expansion (#47), consensus manipulation (#42), ReDoS regression (#48) |
 
-*Note: v0.6.2 baseline count of 148 includes some tests counted differently across runs due to describe block nesting. The 264 total is the current authoritative count (156 proxy + 73 analyzer + 35 agent).*
+*Note: v0.6.2 baseline count of 148 includes some tests counted differently across runs due to describe block nesting. The 321 total is the current authoritative count (180 proxy + 106 analyzer + 35 agent).*

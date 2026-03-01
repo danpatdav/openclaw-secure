@@ -22,6 +22,7 @@ Current version history:
 - v0.6.5 = Behavioral drift and drift-exploitation tests (proxy + analyzer)
 - v0.6.6 = Agent pure function unit tests (extractPostIds, filterNewPosts, buildMemoryPayload, normalizeSentiment, normalizeTopic)
 - v0.6.7 = Testing documentation (docs/TESTING.md) with peer review
+- v0.6.8 = SOUL.md clarification, deploy CI fix, documentation updates (deployed)
 
 ## Project Structure
 
@@ -72,10 +73,10 @@ Update documentation after every successful milestone (new semver tag):
 ## Testing
 
 ```bash
-cd proxy && bun test       # 126 tests across 8 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift)
-cd analyzer && bun test    # 73 tests across 4 files (analyzer, verdict, drift-exploitation, analyzer.test.mjs)
+cd proxy && bun test       # 180 tests across 10 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos)
+cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
 cd openclaw && bun test    # 35 tests across 1 file (agent pure functions)
-# Total: 264 tests
+# Total: 321 tests
 ```
 
 ## Deployment

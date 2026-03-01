@@ -13,7 +13,7 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **MVP3** | Stable operation — structural pre-checks, calibrated verdicts | **Live** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
-**Tests:** 264 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
+**Tests:** 321 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
 
 ## Architecture
 
