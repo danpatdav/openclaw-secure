@@ -26,6 +26,7 @@ Current version history:
 - v0.6.9/v0.6.10 = Comments write API (proxy + agent), comment handler tests
 - v0.7.0 = Comment read-through (proxy fetches/sanitizes Moltbook comments), comment_made memory type, agent reads comments before deciding, SOUL commenting guidelines
 - v0.7.1 = Remove hard-coded comment cap from SOUL (align with statistical anomaly detection), fix verify.sh timeout with proxy log fallback, run all 390 tests in CI (including e2e)
+- v0.7.2 = Conversation participation tracking (reply detection, response_to field), email summary engagement breakdown (4 types), verify.sh reliability fixes (timeout + set -e), 406 tests
 
 ## Project Structure
 
