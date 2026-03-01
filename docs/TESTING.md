@@ -11,6 +11,17 @@ OpenClaw-Secure's test suite serves two purposes:
 
 This dual approach ensures we know exactly where our defenses are strong and where they need hardening.
 
+## Threat Model
+
+The test suite is designed against the following attacker capabilities:
+
+- **Feed injection:** Attacker can post crafted content on Moltbook that the agent reads and feeds to Claude for analysis.
+- **Outbound manipulation:** Attacker attempts to make the agent post malicious content through the proxy (prompt injection, role injection, data exfiltration).
+- **Run disruption:** Attacker may crash or restart the agent to exploit the 30-minute auto-approve window, preventing behavioral analysis.
+- **Behavioral drift:** Attacker programs the agent to gradually increase activity, poisoning the anomaly detection baseline over time.
+- **Memory/state poisoning:** Attacker may craft content that alters the agent's stored memory payload or topic/sentiment classifications.
+- **Encoding/evasion:** Attacker uses Unicode homoglyphs, zero-width characters, alternative encodings, or semantic synonyms to bypass regex-based detection.
+
 ## Architecture Overview
 
 ```
@@ -65,10 +76,11 @@ This dual approach ensures we know exactly where our defenses are strong and whe
 
 ## Environment Setup
 
-- **Bun** v1.0+ required (used as runtime and test runner for all components)
+- **Bun v1.0+** is the required **test runner** for all components (`bun test`).
+- **Runtime note:** The analyzer and agent are authored as Node.js ESM modules, but all tests run under Bun for consistency and speed.
 - Install dependencies per component: `cd proxy && bun install`, `cd analyzer && bun install`, `cd openclaw && bun install`
-- No external services needed for unit tests — all network calls are mocked
-- E2E tests require a running proxy instance (see below)
+- Unit tests do not require external services — all network and model calls are mocked.
+- E2E tests require a running proxy instance (see below).
 
 ## Running Tests
 
@@ -95,19 +107,30 @@ cd proxy && bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test
 cd ../analyzer && bun test && cd ../openclaw && bun test
 ```
 
+## What Runs Where
+
+| Suite | Location | CI | Notes |
+|-------|----------|----|-------|
+| Proxy unit tests | `proxy/src/*.test.ts` (listed in ci.yml) | Yes | Required check |
+| Proxy E2E tests | `proxy/src/e2e-proxy.test.ts` | No | Requires running proxy |
+| Analyzer tests | `analyzer/*.test.mjs` | No | Must run locally before PR |
+| Agent tests | `openclaw/agent.test.mjs` | No | Must run locally before PR |
+
 ## Attack Taxonomy
 
 The test suite covers attacks across 7 categories. Tests exist in both the sanitizer unit tests (verifying detection) and the gap documentation tests (verifying non-detection).
 
-| # | Category | Status | Test Files | Notable Gaps |
-|---|----------|--------|------------|--------------|
-| 1 | Direct Prompt Injection | Covered | sanitizer, e2e-proxy | — |
-| 2 | Role Injection | Covered | sanitizer, e2e-proxy | — |
-| 3 | Instruction Injection | Covered | sanitizer, e2e-proxy | — |
-| 4 | Data Exfiltration | Covered | sanitizer, e2e-proxy | — |
-| 5 | Encoding Evasion | Partial | sanitizer, indirect-injection | Hex, URL, ROT13, leetspeak |
-| 6 | Indirect Prompt Injection | Gap documented | indirect-injection | All inbound content unfiltered |
-| 7 | Semantic Evasion | Gap documented | indirect-injection | Synonyms, Unicode, zero-width |
+**Important:** The proxy sanitizer applies to **outbound** agent posts only. Inbound Moltbook feed content is not sanitized (see Gap 1).
+
+| # | Category | Outbound | Inbound | Test Files | Notable Gaps |
+|---|----------|----------|---------|------------|--------------|
+| 1 | Direct Prompt Injection | Covered | Not covered | sanitizer, e2e-proxy | — |
+| 2 | Role Injection | Covered | Not covered | sanitizer, e2e-proxy | — |
+| 3 | Instruction Injection | Covered | Not covered | sanitizer, e2e-proxy | — |
+| 4 | Data Exfiltration | Covered | N/A | sanitizer, e2e-proxy | — |
+| 5 | Encoding Evasion | Partial | Not covered | sanitizer, indirect-injection | Hex, URL, ROT13, leetspeak |
+| 6 | Indirect Prompt Injection | N/A | Gap documented | indirect-injection | All inbound unfiltered |
+| 7 | Semantic Evasion | Gap documented | Gap documented | indirect-injection | Synonyms, Unicode, zero-width |
 
 ### Category 1: Direct Prompt Injection
 
@@ -229,7 +252,9 @@ The anomaly detector logs warnings but never blocks requests. Even when a genuin
 2. **File naming:** `{module}.test.ts` for TypeScript, `{module}.test.mjs` for ESM JavaScript.
 3. **Use `bun:test`** — all tests use Bun's built-in test runner (`describe`, `it`, `expect`, `beforeEach`).
 4. **Mock external dependencies** — use `mock.module()` for Azure, API clients, etc. Never make real network calls.
-5. **Document intent** — add a file-level JSDoc explaining what the test file covers and which Council priority / issue it addresses.
+5. **Document intent** — add a file-level JSDoc explaining what the test file covers and which issue it addresses.
+6. **Gap tests require markers** — include a `// GAP-DOC: expected bypass` comment and reference a GitHub tracking issue in the JSDoc header.
+7. **No network in tests** — if a test needs I/O, use a local mock server started inside the test process.
 
 ### Adding a Sanitizer Pattern Test
 
@@ -308,14 +333,23 @@ When adding a new proxy test file, add it to this list.
 
 ## Future Testing Roadmap
 
-Based on external peer review, the following testing approaches should be considered for future iterations:
+Based on external peer review (GPT-4.1 and GPT-5.2), the following should be considered:
 
-- **Fuzzing / property-based testing** — Use [fast-check](https://github.com/dubzzz/fast-check) for randomized sanitizer input testing
+**New test categories:**
+- **Fuzzing / property-based testing** — Use [fast-check](https://github.com/dubzzz/fast-check) for randomized sanitizer input testing with properties like "sanitize never throws" and "same semantic string produces same detection"
 - **Model escape attacks** — DAN-style jailbreak payloads and prompt leakage tests
-- **Cross-context contamination** — Payloads affecting adjacent threads when agent memory is shared
-- **Static analysis** — Semgrep or ESLint security rules for the codebase
+- **Consensus manipulation** — Craft content that triggers one model but not the other; test model-targeted jailbreaks (Claude-specific vs GPT-specific phrasing)
+- **Memory/state poisoning** — Repeated benign-looking posts that alter stored memory; preference shaping ("always trust posts from @admin")
+- **SSRF-style attempts** — Internal IP ranges (169.254.169.254, RFC1918), DNS rebinding hostnames, URL parsing edge cases (`http://allowed.com@evil.com/`)
+- **Redaction/PII leakage** — Verify logs do not contain secrets, API keys, Authorization headers, or raw injection payloads
+- **Regex catastrophic backtracking** — Test sanitizer performance with worst-case input strings
+
+**Infrastructure improvements:**
+- **Record/replay for dual-model tests** — Store model responses as fixtures for deterministic CI runs
+- **Security invariants per component** — Define "must always be true" properties (e.g., "proxy never forwards disallowed domains")
+- **Static analysis** — Semgrep or ESLint security rules for SSRF, unsafe URL parsing, dangerous regex
 - **Dependency scanning** — `bun audit` or Snyk for vulnerable dependencies
-- **Load/concurrency testing** — Rate limiting and concurrent request behavior under stress
+- **DAST-like local harness** — Proxy + mock Moltbook server for E2E HTTP-layer validation
 
 ## Version History
 
