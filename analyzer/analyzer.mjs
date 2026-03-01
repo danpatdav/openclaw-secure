@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * OpenClaw Secure — Dual-Model Analyzer (MVP3)
+ * OpenClaw Secure — Dual-Model Analyzer
  *
  * Analyzes agent memory blobs using deterministic pre-checks + dual AI models.
  * Philosophy: "Trust the proxy." The proxy enforces schema validation and monitors activity.
@@ -351,7 +351,7 @@ function computeVerdict(precheck, claudeResult, openaiResult) {
 // --- Main ---
 
 async function main() {
-  log("info", "Analyzer starting (MVP3)", { storage_account: STORAGE_ACCOUNT, container: CONTAINER_NAME });
+  log("info", "Analyzer starting", { storage_account: STORAGE_ACCOUNT, container: CONTAINER_NAME });
 
   if (!STORAGE_ACCOUNT || !ANTHROPIC_API_KEY || !OPENAI_API_KEY) {
     log("error", "Missing required environment variables", {

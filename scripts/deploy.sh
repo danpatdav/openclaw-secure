@@ -5,7 +5,7 @@ set -euo pipefail
 # OpenClaw Secure — Full Deployment Script
 # Deploys infrastructure, builds containers, and launches ACI groups.
 #
-# Usage: ./deploy.sh [mvp0|mvp1|mvp2] [resource-group-name]
+# Usage: ./deploy.sh [resource-group-name]
 # ============================================================================
 
 # -- Color helpers --
@@ -21,20 +21,12 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()   { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # -- Arguments --
-MVP_LEVEL="${1:-mvp0}"
-RESOURCE_GROUP="${2:-rg-openclaw-secure}"
+RESOURCE_GROUP="${1:-rg-openclaw-secure}"
 LOCATION="eastus2"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-if [[ ! "$MVP_LEVEL" =~ ^(mvp0|mvp1|mvp2)$ ]]; then
-  err "Invalid MVP level: $MVP_LEVEL"
-  echo "Usage: $0 [mvp0|mvp1|mvp2] [resource-group-name]"
-  exit 1
-fi
-
 echo ""
 echo -e "${CYAN}=== OpenClaw Secure Deployment ===${NC}"
-echo "MVP Level:      $MVP_LEVEL"
 echo "Resource Group: $RESOURCE_GROUP"
 echo "Location:       $LOCATION"
 echo "Project Dir:    $PROJECT_DIR"
@@ -61,7 +53,7 @@ info "[1/5] Creating resource group '$RESOURCE_GROUP' in '$LOCATION'..."
 az group create \
   --name "$RESOURCE_GROUP" \
   --location "$LOCATION" \
-  --tags project=openclaw-secure environment=dev mvp="$MVP_LEVEL" \
+  --tags project=openclaw-secure environment=dev \
   --output none
 
 ok "Resource group ready."
@@ -100,14 +92,14 @@ az acr login --name "$ACR_NAME_ACTUAL"
 
 # Build and push proxy image
 info "  Building proxy image..."
-docker build -t "${ACR_LOGIN_SERVER}/openclaw-proxy:${MVP_LEVEL}" "$PROJECT_DIR/proxy/"
-docker push "${ACR_LOGIN_SERVER}/openclaw-proxy:${MVP_LEVEL}"
+docker build -t "${ACR_LOGIN_SERVER}/openclaw-proxy:latest" "$PROJECT_DIR/proxy/"
+docker push "${ACR_LOGIN_SERVER}/openclaw-proxy:latest"
 ok "  Proxy image pushed."
 
 # Build and push OpenClaw agent image
 info "  Building openclaw-agent image..."
-docker build -t "${ACR_LOGIN_SERVER}/openclaw-agent:${MVP_LEVEL}" "$PROJECT_DIR/openclaw/"
-docker push "${ACR_LOGIN_SERVER}/openclaw-agent:${MVP_LEVEL}"
+docker build -t "${ACR_LOGIN_SERVER}/openclaw-agent:latest" "$PROJECT_DIR/openclaw/"
+docker push "${ACR_LOGIN_SERVER}/openclaw-agent:latest"
 ok "  Agent image pushed."
 
 # --------------------------------------------------------------------------
@@ -128,11 +120,11 @@ info "[5/5] Deploying ACI container groups..."
 az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
   --template-file "$PROJECT_DIR/infra/aci/container-group.bicep" \
-  --parameters "$PROJECT_DIR/infra/aci/parameters.${MVP_LEVEL}.json" \
+  --parameters "$PROJECT_DIR/infra/aci/parameters.json" \
   --parameters acrLoginServer="$ACR_LOGIN_SERVER" \
     acrName="$ACR_NAME_ACTUAL" \
-    proxyImage="${ACR_LOGIN_SERVER}/openclaw-proxy:${MVP_LEVEL}" \
-    openclawImage="${ACR_LOGIN_SERVER}/openclaw-agent:${MVP_LEVEL}" \
+    proxyImage="${ACR_LOGIN_SERVER}/openclaw-proxy:latest" \
+    openclawImage="${ACR_LOGIN_SERVER}/openclaw-agent:latest" \
   --output none
 
 ok "ACI container groups deployed."
@@ -145,7 +137,6 @@ echo -e "${GREEN}=== Deployment Complete ===${NC}"
 echo "Resource Group: $RESOURCE_GROUP"
 echo "ACR:            $ACR_LOGIN_SERVER"
 echo "Key Vault:      $VAULT_NAME"
-echo "MVP Level:      $MVP_LEVEL"
 echo ""
 echo "Next steps:"
 echo "  1. Set API key (if not already done):"

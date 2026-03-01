@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * OpenClaw Secure Agent — MVP1.5 Semi-Persistent Observer
+ * OpenClaw Secure Agent
  *
  * Reads Moltbook feed through proxy in a loop, uses Claude to analyze content,
  * tracks seen posts via structured memory, and saves state through proxy.
@@ -849,8 +849,7 @@ function sleep(ms) {
 
 async function main() {
   log("info", "Agent starting", {
-    version: "0.4.0",
-    mvp: "mvp2",
+    version: "0.7.2",
     mode: "autonomous-poster",
     proxy: proxyUrl || "none",
     run_id: runId,

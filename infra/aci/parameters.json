@@ -4,9 +4,6 @@
   "parameters": {
     "projectName": {
       "value": "openclaw"
-    },
-    "mvpLevel": {
-      "value": "mvp1"
     }
   }
 }

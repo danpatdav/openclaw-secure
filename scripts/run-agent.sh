@@ -6,7 +6,7 @@ set -euo pipefail
 # Creates a fresh ACI container group, waits for completion, prints logs,
 # then cleans up. Designed for one-shot agent executions.
 #
-# Usage: ./run-agent.sh [mvp0|mvp1|mvp2] [resource-group-name]
+# Usage: ./run-agent.sh [resource-group-name]
 # ============================================================================
 
 # -- Color helpers --
@@ -23,22 +23,14 @@ err()  { echo -e "${RED}[ERROR]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
 # -- Arguments --
-MVP_LEVEL="${1:-mvp0}"
-RESOURCE_GROUP="${2:-rg-openclaw-secure}"
+RESOURCE_GROUP="${1:-rg-openclaw-secure}"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-
-if [[ ! "$MVP_LEVEL" =~ ^(mvp0|mvp1|mvp2)$ ]]; then
-  err "Invalid MVP level: $MVP_LEVEL"
-  echo "Usage: $0 [mvp0|mvp1|mvp2] [resource-group-name]"
-  exit 1
-fi
 
 RUN_ID="run-$(date +%s)"
 CONTAINER_NAME="openclaw-run-${RUN_ID}"
 
 echo ""
 echo -e "${CYAN}${BOLD}=== OpenClaw Secure — On-Demand Agent Run ===${NC}"
-echo "MVP Level:      $MVP_LEVEL"
 echo "Resource Group: $RESOURCE_GROUP"
 echo "Run ID:         $RUN_ID"
 echo "Container:      $CONTAINER_NAME"
@@ -59,7 +51,7 @@ ACR_NAME_ACTUAL=$(az deployment group show \
 
 if [[ -z "$ACR_LOGIN_SERVER" || -z "$ACR_NAME_ACTUAL" ]]; then
   err "Could not resolve ACR details. Is the infrastructure deployed?"
-  err "Run: ./scripts/deploy.sh $MVP_LEVEL $RESOURCE_GROUP"
+  err "Run: ./scripts/deploy.sh $RESOURCE_GROUP"
   exit 1
 fi
 
@@ -73,11 +65,11 @@ info "Creating one-shot container group..."
 az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
   --template-file "$PROJECT_DIR/infra/aci/container-group.bicep" \
-  --parameters "$PROJECT_DIR/infra/aci/parameters.${MVP_LEVEL}.json" \
+  --parameters "$PROJECT_DIR/infra/aci/parameters.json" \
   --parameters acrLoginServer="$ACR_LOGIN_SERVER" \
     acrName="$ACR_NAME_ACTUAL" \
-    proxyImage="${ACR_LOGIN_SERVER}/openclaw-proxy:${MVP_LEVEL}" \
-    openclawImage="${ACR_LOGIN_SERVER}/openclaw-agent:${MVP_LEVEL}" \
+    proxyImage="${ACR_LOGIN_SERVER}/openclaw-proxy:latest" \
+    openclawImage="${ACR_LOGIN_SERVER}/openclaw-agent:latest" \
     containerGroupName="$CONTAINER_NAME" \
     restartPolicy="Never" \
   --output none

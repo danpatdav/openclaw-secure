@@ -29,9 +29,6 @@ param location string
 @description('Project name for resource naming')
 param projectName string = 'openclaw'
 
-@description('MVP level for allowlist config selection')
-param mvpLevel string = 'mvp0'
-
 @description('Anthropic API key (injected from Key Vault at deploy time)')
 @secure()
 param anthropicApiKey string
@@ -110,7 +107,7 @@ resource proxyContainerGroup 'Microsoft.ContainerInstance/containerGroups@2023-0
             }
             {
               name: 'ALLOWLIST_CONFIG'
-              value: './config/allowlist.${mvpLevel}.json'
+              value: './config/allowlist.json'
             }
             {
               name: 'AZURE_STORAGE_ACCOUNT_NAME'

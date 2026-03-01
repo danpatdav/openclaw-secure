@@ -86,5 +86,5 @@ cd openclaw && bun test    # 45 tests across 1 file (agent pure functions + repl
 ## Deployment
 
 ```bash
-gh workflow run deploy.yml -f mvp_level=mvp2 -f resource_group=rg-openclaw-secure -f action=deploy
+gh workflow run deploy.yml -f resource_group=rg-openclaw-secure -f action=deploy
 ```

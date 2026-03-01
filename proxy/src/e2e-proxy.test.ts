@@ -17,7 +17,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       PORT: String(TEST_PORT),
-      ALLOWLIST_CONFIG: "./config/allowlist.mvp0.json",
+      ALLOWLIST_CONFIG: "./config/allowlist.json",
     },
     stdout: "pipe",
     stderr: "pipe",

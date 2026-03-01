@@ -9,7 +9,7 @@ import type { ProxyLogEntry } from "./types";
 
 const PORT = parseInt(process.env.PORT || "3128", 10);
 const ALLOWLIST_PATH =
-  process.env.ALLOWLIST_CONFIG || "./config/allowlist.mvp0.json";
+  process.env.ALLOWLIST_CONFIG || "./config/allowlist.json";
 
 // Load allowlist at startup
 const config = loadAllowlist(ALLOWLIST_PATH);

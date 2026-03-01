@@ -108,8 +108,8 @@ resource nsgProxy 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
           destinationAddressPrefix: 'Internet'
           // NSG allows HTTPS to any destination. Domain-level filtering is
           // enforced by the proxy application layer (allowlist.json).
-          // This supports MVP1+ where multiple domains (Anthropic, Moltbook)
-          // may resolve to different/changing IP ranges.
+          // Multiple domains (Anthropic, Moltbook) may resolve to
+          // different/changing IP ranges — proxy handles domain filtering.
           description: 'Allow outbound HTTPS — proxy enforces domain allowlist'
         }
       }

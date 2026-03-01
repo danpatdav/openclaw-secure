@@ -3,15 +3,6 @@ name: Deploy
 on:
   workflow_dispatch:
     inputs:
-      mvp_level:
-        description: 'MVP level to deploy'
-        required: true
-        default: 'mvp0'
-        type: choice
-        options:
-          - mvp0
-          - mvp1
-          - mvp2
       resource_group:
         description: 'Azure resource group name'
         required: true
@@ -34,7 +25,6 @@ permissions:
 
 env:
   AZURE_RESOURCE_GROUP: ${{ inputs.resource_group }}
-  MVP_LEVEL: ${{ inputs.mvp_level }}
 
 jobs:
   # Gate: require CI to pass first
@@ -144,11 +134,11 @@ jobs:
         run: |
           az acr login --name "${{ steps.infra.outputs.acr_name }}"
 
-          docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-proxy:$MVP_LEVEL" proxy/
-          docker push "${{ steps.infra.outputs.acr_login }}/openclaw-proxy:$MVP_LEVEL"
+          docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-proxy:latest" proxy/
+          docker push "${{ steps.infra.outputs.acr_login }}/openclaw-proxy:latest"
 
-          docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-agent:$MVP_LEVEL" openclaw/
-          docker push "${{ steps.infra.outputs.acr_login }}/openclaw-agent:$MVP_LEVEL"
+          docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-agent:latest" openclaw/
+          docker push "${{ steps.infra.outputs.acr_login }}/openclaw-agent:latest"
 
           docker build -t "${{ steps.infra.outputs.acr_login }}/openclaw-analyzer:latest" analyzer/
           docker push "${{ steps.infra.outputs.acr_login }}/openclaw-analyzer:latest"
@@ -181,12 +171,12 @@ jobs:
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --template-file infra/aci/container-group.bicep \
-            --parameters "infra/aci/parameters.${MVP_LEVEL}.json" \
+            --parameters infra/aci/parameters.json \
             --parameters \
               acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
               acrName="${{ steps.infra.outputs.acr_name }}" \
-              proxyImage="${{ steps.infra.outputs.acr_login }}/openclaw-proxy:${MVP_LEVEL}" \
-              openclawImage="${{ steps.infra.outputs.acr_login }}/openclaw-agent:${MVP_LEVEL}" \
+              proxyImage="${{ steps.infra.outputs.acr_login }}/openclaw-proxy:latest" \
+              openclawImage="${{ steps.infra.outputs.acr_login }}/openclaw-agent:latest" \
               workspaceKey="$WORKSPACE_KEY" \
               privateSubnetId="${{ steps.infra.outputs.private_subnet }}" \
               proxySubnetId="${{ steps.infra.outputs.proxy_subnet }}" \
@@ -199,7 +189,6 @@ jobs:
       - name: Deployment summary
         run: |
           echo "## Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **MVP Level:** $MVP_LEVEL" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Resource Group:** $AZURE_RESOURCE_GROUP" >> "$GITHUB_STEP_SUMMARY"
           echo "- **ACR:** ${{ steps.infra.outputs.acr_login }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Key Vault:** ${{ steps.infra.outputs.vault_name }}" >> "$GITHUB_STEP_SUMMARY"

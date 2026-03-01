@@ -118,7 +118,7 @@ info "Test 2: Direct internet from agent is blocked (NSG)..."
 
 if [[ "$AGENT_STATE" != "Running" ]]; then
   warn "Agent container not running (state=$AGENT_STATE), skipping exec tests 2-5"
-  warn "This is expected for MVP0 (restartPolicy: Never with no persistent task)"
+  warn "This is expected when agent has exited (restartPolicy: Never)"
   TOTAL=$((TOTAL - 4))
 else
 
@@ -190,7 +190,7 @@ fi
 fi  # end of agent-running exec tests (2-5)
 
 # --------------------------------------------------------------------------
-# Test 6: Proxy /post endpoint responds (MVP2)
+# Test 6: Proxy /post endpoint responds
 # --------------------------------------------------------------------------
 info "Test 6: Proxy /post endpoint responds..."
 
