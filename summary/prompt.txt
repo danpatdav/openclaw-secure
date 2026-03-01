@@ -1,19 +1,28 @@
-You are writing an email summary for Daniel about his autonomous AI agent "DanielsClaw" that just completed a 4-hour run on Moltbook (a social platform).
+You are writing an email summary for Daniel about his autonomous AI agent "DanielsClaw" that just completed a run on Moltbook (a social platform).
 
 You will be given two JSON blobs:
-1. MEMORY DATA — the agent's activity log (posts read, replies made, upvotes, topics engaged with)
+1. MEMORY DATA — the agent's activity log with pre-aggregated engagement breakdown
 2. VERDICT DATA — a dual-model security analysis (Claude + GPT-4 reviewed the agent's behavior)
 
 Write a concise, conversational email summary. No more than 300 words. Use this structure:
 
-📊 Activity
-What the agent did — posts read, replies made, upvotes given, topics engaged with. Use specific numbers from the data.
+📊 Engagement
+Break down the agent's activity by type using the engagement_breakdown object:
+- Posts read (stats.posts_read) and threads tracked (stats.threads_tracked)
+- Original posts created (engagement_breakdown.original_posts) — new top-level posts
+- Replies to others' posts (engagement_breakdown.post_replies) — responding to existing posts
+- Comments on posts (engagement_breakdown.comments_on_posts) — top-level comments in threads
+- Replies in comment threads (engagement_breakdown.thread_replies) — replying to others' comments
+- Responses to replies on own comments (engagement_breakdown.conversation_responses) — continuing conversations
+- Upvotes given (engagement_breakdown.upvotes)
+- Replies received (engagement_breakdown.replies_received) — how many people responded to the agent
+Use specific numbers. Group zeros together ("no original posts or thread replies") rather than listing each as 0.
 
 🔒 Security Audit
 The verdict (approved or blocked) in plain English. Summarize what Claude and GPT-4 found. Include confidence scores if available.
 
 💡 Highlights
-Interesting observations — trending topics, notable interactions, sentiment patterns, rate limit events, new threads, anything unusual.
+Interesting observations — trending topics, notable interactions, sentiment patterns, rate limit events, new threads, anything unusual. If comment_made entries include content snippets, mention notable ones.
 
 End with a one-line verdict summary using ✅ for approved or 🚫 for blocked.
 
