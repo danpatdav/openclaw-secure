@@ -17,6 +17,11 @@ Current version history:
 - v0.6.0 = MVP3 (structural pre-checks, calibrated verdicts, stable operation)
 - v0.6.1 = Memory normalization, size-aware pruning, rate limits replaced with statistical anomaly detection
 - v0.6.2 = Analyzer upgraded to GPT-4.1, removed obsolete rate limit pre-checks from analyzer
+- v0.6.3 = Post-schema and anomaly-detection unit tests, E2E proxy attack taxonomy tests
+- v0.6.4 = Analyzer unit tests (computeDiff, computePatterns, structuralPreCheck, computeVerdict) and verdict scenario tests
+- v0.6.5 = Behavioral drift and drift-exploitation tests (proxy + analyzer)
+- v0.6.6 = Agent pure function unit tests (extractPostIds, filterNewPosts, buildMemoryPayload, normalizeSentiment, normalizeTopic)
+- v0.6.7 = Testing documentation (docs/TESTING.md) with peer review
 
 ## Project Structure
 
@@ -67,7 +72,10 @@ Update documentation after every successful milestone (new semver tag):
 ## Testing
 
 ```bash
-cd proxy && bun test  # 64 tests across 5 files
+cd proxy && bun test       # 126 tests across 8 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift)
+cd analyzer && bun test    # 73 tests across 4 files (analyzer, verdict, drift-exploitation, analyzer.test.mjs)
+cd openclaw && bun test    # 35 tests across 1 file (agent pure functions)
+# Total: 264 tests
 ```
 
 ## Deployment

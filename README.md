@@ -13,6 +13,7 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **MVP3** | Stable operation — structural pre-checks, calibrated verdicts | **Live** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
+**Tests:** 264 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
 
 ## Architecture
 
@@ -59,7 +60,7 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 |-------|---------|-------------|
 | **Network (NSG)** | Deny-all outbound from agent | Agent can only reach proxy subnet on port 3128 |
 | **Application (Proxy)** | Domain allowlist + method restrictions | Only whitelisted domains/methods pass through |
-| **Application (Proxy)** | Prompt injection sanitizer | Detects and replaces injection patterns in responses |
+| **Application (Proxy)** | Prompt injection sanitizer (outbound) | Detects/replaces injection patterns in **agent outbound posts** before forwarding to Moltbook |
 | **Application (Proxy)** | Statistical anomaly detection | Observe-only: rolling mean + 2σ threshold over 50-cycle window flags unusual activity (no blocking) |
 | **Application (Proxy)** | Content validation | Zod schema: max 500 chars, injection scanning on outbound posts |
 | **Memory (Proxy)** | Zod schema validation | All memory writes validated — no freeform text, fixed enums only |
@@ -88,7 +89,7 @@ The `kill-and-analyze` workflow owns the full agent lifecycle:
 
 6. Analyzer finds the latest unanalyzed memory blob
 7. **Structural pre-checks** (deterministic, before any AI): minimum 30-minute run duration gate, absolute action counts validated
-8. If structurally valid, sends diff + patterns to **Claude** and **OpenAI GPT-4o** (adversarial prompt focused on content manipulation, not rate speculation)
+8. If structurally valid, sends diff + patterns to **Claude** and **OpenAI GPT-4.1** (adversarial prompt focused on content manipulation, not rate speculation)
 9. **Default approved** — blocking requires dual-model consensus: both must say "compromised" with ≥0.8 confidence. Model failures return null (no opinion), not auto-block
 10. Verdict written to `verdicts/<run_id>.json` with structural pre-check details
 11. **Email summary** sent via Azure Communication Services — Claude summarizes the run in plain English
@@ -130,6 +131,7 @@ Deployments run via GitHub Actions with environment protection (manual approval 
 
 ```bash
 # Deploy everything (infra + images + containers)
+# mvp_level selects the ACI parameter file (parameters.mvp0/1/2.json) and proxy allowlist
 gh workflow run deploy.yml \
   --field mvp_level=mvp2 \
   --field resource_group=rg-openclaw-secure \
@@ -139,6 +141,8 @@ gh workflow run deploy.yml \
 The pipeline: preflight checks (SOUL integrity, Bicep validation, secrets scan) → infrastructure deploy → image build/push → ACI deploy → verification suite.
 
 ### Set Secrets (first time only)
+
+Key Vault secret names use hyphens (e.g., `ANTHROPIC-API-KEY`), which Bicep converts to env vars with underscores (`ANTHROPIC_API_KEY`) when injecting into containers.
 
 ```bash
 az keyvault secret set --vault-name <vault-name> --name ANTHROPIC-API-KEY --value 'sk-ant-...'
@@ -270,6 +274,15 @@ monitoring/
   dashboard.kql                — KQL queries for Azure Monitor workbook
 ```
 
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [README.md](README.md) | Architecture, deployment, operations (this file) |
+| [CLAUDE.md](CLAUDE.md) | Project conventions for AI assistants (versioning, workflow, testing) |
+| [docs/TESTING.md](docs/TESTING.md) | Testing strategy, attack taxonomy, known gaps, contributor guide |
+| [openclaw/SOUL.md](openclaw/SOUL.md) | Agent identity and behavioral constraints |
+
 ## Operational Learnings
 
 Issues discovered and resolved during MVP1.5 and MVP2 deployment:
@@ -291,7 +304,7 @@ Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 | Reply content not stored | Couldn't audit what the agent actually posted | Added `content` and `status` fields to `post_made` entries |
 | Analyzer false blocks on short runs | Per-hour rate projections unreliable on <30min runs | Added 30-minute minimum duration gate — short runs auto-approve |
 | Analyzer blocks on normal activity | "Both must agree clean" too strict — single model disagreement blocks | Inverted to "default approved, dual consensus at 0.8+ to block" |
-| OpenAI returning non-JSON | gpt-4 sometimes wraps JSON in prose | Upgraded to gpt-4o with `response_format: { type: "json_object" }` |
+| OpenAI returning non-JSON | Model sometimes wraps JSON in prose | Use GPT-4.1 with `response_format: { type: "json_object" }` and strip code fences defensively |
 | AI models speculate about rates | Models flag proxy-enforced limits as "suspicious" | Structural pre-checks validate math first; AI prompt focused on content manipulation only |
 | Agent never posts | SOUL.md had 4 "default to silence" instructions | Rewrote SOUL for active participation with engagement targets |
 | Independent cron schedules drift | Agent started right before kill, getting only 11min runtime | Unified lifecycle: kill-and-analyze owns restart (single schedule owner) |
@@ -307,7 +320,7 @@ Issues discovered and resolved during MVP1.5 and MVP2 deployment:
 | ACI (analyzer, ~5 runs/day x 15min) | ~$12 |
 | ACR Basic | ~$5 |
 | Blob Storage (~1GB, 7-day retention) | ~$2 |
-| OpenAI API (GPT-4o, ~5 calls/day) | ~$2 |
+| OpenAI API (GPT-4.1, ~5 calls/day) | ~$2 |
 | Claude API (Sonnet, summaries) | ~$0.50 |
 | Azure Communication Services (email) | ~$1 |
 | Log Analytics (~1GB/mo) | ~$3 |

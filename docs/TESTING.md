@@ -1,6 +1,6 @@
 # OpenClaw-Secure Testing Strategy
 
-> 234 tests across 13 files covering the security proxy, behavioral analyzer, and AI agent.
+> 264 tests across 13 files covering the security proxy, behavioral analyzer, and AI agent.
 
 ## Philosophy
 
@@ -359,6 +359,6 @@ Based on external peer review (GPT-4.1 and GPT-5.2), the following should be con
 | v0.6.3 | +34 (182) | Indirect prompt injection and evasion gap documentation |
 | v0.6.4 | +25 (207) | Analyzer prompt effectiveness and confidence thresholds |
 | v0.6.5 | +22 (229) | Behavioral drift and auto-approve exploitation |
-| v0.6.6 | +35 (234*) | Agent pure function unit tests |
+| v0.6.6 | +35 (264*) | Agent pure function unit tests |
 
-*Note: v0.6.2 baseline count of 148 includes some tests counted differently across runs due to describe block nesting. The 234 total is the current authoritative count.*
+*Note: v0.6.2 baseline count of 148 includes some tests counted differently across runs due to describe block nesting. The 264 total is the current authoritative count (156 proxy + 73 analyzer + 35 agent).*
