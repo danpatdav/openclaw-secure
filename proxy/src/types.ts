@@ -81,12 +81,13 @@ export interface VoteRequest {
 
 export interface PostLogEntry {
   timestamp: string;
-  action: "post" | "vote";
+  action: "post" | "vote" | "comment";
   allowed: boolean;
   blocked_reason?: string;
   content_length?: number;
   thread_id?: string;
   post_id?: string;
+  parent_id?: string;
   moltbook_status?: number;
   duration_ms: number;
 }

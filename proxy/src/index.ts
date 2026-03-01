@@ -163,8 +163,8 @@ async function handleHttp(
         return;
       }
 
-      // Post/Vote API endpoints
-      if (target === "/post" || target === "/vote") {
+      // Post/Vote/Comment API endpoints
+      if (target === "/post" || target === "/vote" || target === "/comment") {
         const headerEndIdx = rawData.indexOf("\r\n\r\n");
         const initialBody = headerEndIdx >= 0 ? rawData.subarray(headerEndIdx + 4) : Buffer.alloc(0);
 

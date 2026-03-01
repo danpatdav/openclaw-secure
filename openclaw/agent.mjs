@@ -37,6 +37,7 @@ const trackedThreads = new Map();
 const postsMade = [];
 let postsReadCount = 0;
 let upvotesCount = 0;
+let commentsCount = 0;
 let checkpointNum = 0;
 
 // --- Schema Normalization ---
@@ -176,6 +177,7 @@ function buildMemoryPayload() {
       posts_read: postsReadCount,
       posts_made: postsMade.length,
       upvotes: upvotesCount,
+      comments: commentsCount,
       threads_tracked: trackedThreads.size,
     },
   };
@@ -402,6 +404,35 @@ async function upvotePost(postId) {
   }
 }
 
+async function commentOnPost(postId, content, parentId) {
+  try {
+    const body = { post_id: postId, content };
+    if (parentId) body.parent_id = parentId;
+
+    log("info", "Commenting on post via proxy...", { post_id: postId, content_length: content.length, parent_id: parentId });
+
+    // Direct fetch — comment endpoint is ON the proxy, not through it
+    const res = await fetch(`${PROXY_BASE_URL}/comment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      log("warn", "Comment rejected by proxy", { status: res.status, error: result.error });
+      return { ok: false, status: res.status, error: result.error };
+    }
+
+    log("info", "Comment submitted successfully", { post_id: postId });
+    return { ok: true, status: res.status, data: result.data };
+  } catch (err) {
+    log("error", "Comment failed", { error: err.message });
+    return { ok: false, error: err.message };
+  }
+}
+
 // --- Single Cycle ---
 
 async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
@@ -449,6 +480,7 @@ Output your analysis as structured JSON:
   "safety_notes": ["any concerns"],
   "actions": {
     "posts": [{"content": "your reply text", "thread_id": "post-id-to-reply-to"}],
+    "comments": [{"post_id": "post-id", "content": "your comment text", "parent_id": "optional-comment-id-to-reply-to"}],
     "upvotes": ["post_id_1"],
     "skip_reason": "nothing warranting a response"
   }
@@ -464,7 +496,15 @@ Rules for posting decisions:
 - Max 2 posts per cycle
 - Keep each post under 500 characters
 - Do not post in the same thread twice in one cycle
-- When uncertain, skip — observation is fine`;
+- When uncertain, skip — observation is fine
+
+Rules for commenting:
+- Use comments to engage in threaded discussions on specific posts
+- Include post_id to comment on a post, and optional parent_id to reply to a specific comment
+- Prefer comments over posts when engaging in an existing conversation
+- Max 3 comments per cycle
+- Keep each comment under 500 characters
+- Comments are better for short reactions, follow-up questions, and building on others' points`;
 
   const userMessage = `Here is the Moltbook feed content (HTTP ${feed.status}, cycle ${cycleNum}, ${dedup.new} new posts):\n\n${feed.body.slice(0, 8000)}`;
 
@@ -589,6 +629,55 @@ Rules for posting decisions:
           thread_id: "vote",
           timestamp: new Date().toISOString(),
           action: "upvote",
+          status: "error",
+        });
+      }
+    }
+
+    // Execute comment actions
+    const comments = Array.isArray(actions.comments) ? actions.comments.slice(0, 3) : [];
+    let commentRateLimited = false;
+    for (const comment of comments) {
+      if (commentRateLimited) {
+        log("info", "Skipping remaining comments — rate limited by proxy");
+        break;
+      }
+      if (!comment.content || typeof comment.content !== "string") continue;
+      if (!comment.post_id || typeof comment.post_id !== "string") continue;
+      if (comment.content.length > 500) {
+        log("warn", "Skipping comment — content exceeds 500 chars", { length: comment.content.length });
+        continue;
+      }
+
+      const result = await commentOnPost(comment.post_id, comment.content, comment.parent_id);
+      if (result.ok) {
+        commentsCount++;
+        postsMade.push({
+          type: "post_made",
+          post_id: String(comment.post_id),
+          thread_id: comment.parent_id || comment.post_id,
+          content: comment.content,
+          timestamp: new Date().toISOString(),
+          action: "comment",
+          status: "success",
+        });
+      } else if (result.status === 429) {
+        commentRateLimited = true;
+        postsMade.push({
+          type: "post_made",
+          post_id: String(comment.post_id),
+          thread_id: comment.parent_id || comment.post_id,
+          timestamp: new Date().toISOString(),
+          action: "comment",
+          status: "rate_limited",
+        });
+      } else {
+        postsMade.push({
+          type: "post_made",
+          post_id: String(comment.post_id),
+          thread_id: comment.parent_id || comment.post_id,
+          timestamp: new Date().toISOString(),
+          action: "comment",
           status: "error",
         });
       }

@@ -1,5 +1,5 @@
 import type { Socket } from "node:net";
-import { postRequestSchema, voteRequestSchema } from "./post-schema";
+import { postRequestSchema, voteRequestSchema, commentRequestSchema } from "./post-schema";
 import { sanitize } from "./sanitizer";
 import { log as proxyLog } from "./logger";
 import type { PostLogEntry } from "./types";
@@ -17,6 +17,8 @@ interface CycleActivity {
   posts_succeeded: number;
   votes_attempted: number;
   votes_succeeded: number;
+  comments_attempted: number;
+  comments_succeeded: number;
 }
 
 const ACTIVITY_WINDOW_SIZE = 50; // rolling window for stats
@@ -29,6 +31,8 @@ let currentCycle: CycleActivity = {
   posts_succeeded: 0,
   votes_attempted: 0,
   votes_succeeded: 0,
+  comments_attempted: 0,
+  comments_succeeded: 0,
 };
 
 // Rotate cycle every 5 minutes (matching agent cycle interval)
@@ -50,19 +54,24 @@ function rotateCycleIfNeeded(): void {
       posts_succeeded: 0,
       votes_attempted: 0,
       votes_succeeded: 0,
+      comments_attempted: 0,
+      comments_succeeded: 0,
     };
     lastCycleRotation = now;
   }
 }
 
-function recordActivity(action: "post" | "vote", succeeded: boolean): void {
+function recordActivity(action: "post" | "vote" | "comment", succeeded: boolean): void {
   rotateCycleIfNeeded();
   if (action === "post") {
     currentCycle.posts_attempted++;
     if (succeeded) currentCycle.posts_succeeded++;
-  } else {
+  } else if (action === "vote") {
     currentCycle.votes_attempted++;
     if (succeeded) currentCycle.votes_succeeded++;
+  } else {
+    currentCycle.comments_attempted++;
+    if (succeeded) currentCycle.comments_succeeded++;
   }
 }
 
@@ -102,6 +111,19 @@ function checkForAnomalies(cycle: CycleActivity): void {
       const direction = voteZ > 0 ? "high" : "low";
       anomalies.push(
         `votes_${direction}: ${cycle.votes_attempted} (mean=${voteStats.mean.toFixed(1)}, σ=${voteStats.stddev.toFixed(1)}, z=${voteZ.toFixed(1)})`
+      );
+    }
+  }
+
+  // Check comments
+  const commentCounts = activityHistory.map((c) => c.comments_attempted ?? 0);
+  const commentStats = computeStats(commentCounts);
+  if (commentStats.stddev > 0) {
+    const commentZ = ((cycle.comments_attempted ?? 0) - commentStats.mean) / commentStats.stddev;
+    if (Math.abs(commentZ) > ANOMALY_THRESHOLD_SIGMA) {
+      const direction = commentZ > 0 ? "high" : "low";
+      anomalies.push(
+        `comments_${direction}: ${cycle.comments_attempted} (mean=${commentStats.mean.toFixed(1)}, σ=${commentStats.stddev.toFixed(1)}, z=${commentZ.toFixed(1)})`
       );
     }
   }
@@ -156,7 +178,7 @@ function logPostAttempt(entry: PostLogEntry): void {
     method: "POST",
     hostname: "moltbook.com",
     port: 443,
-    path: entry.action === "post" ? "/api/v1/posts" : "/api/v1/votes",
+    path: entry.action === "post" ? "/api/v1/posts" : entry.action === "comment" ? "/api/v1/comments" : "/api/v1/votes",
     allowed: entry.allowed,
     blocked_reason: entry.blocked_reason,
     sanitized: false,
@@ -427,6 +449,156 @@ async function handleVote(socket: Socket, body: Buffer): Promise<void> {
   }
 }
 
+// --- Comment Handler ---
+
+async function handleComment(socket: Socket, body: Buffer): Promise<void> {
+  const start = performance.now();
+  const logEntry: PostLogEntry = {
+    timestamp: new Date().toISOString(),
+    action: "comment",
+    allowed: false,
+    duration_ms: 0,
+  };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body.toString("utf-8"));
+  } catch {
+    logEntry.duration_ms = performance.now() - start;
+    logPostAttempt(logEntry);
+    sendResponse(socket, 400, "Bad Request", JSON.stringify({ error: "Invalid JSON" }));
+    return;
+  }
+
+  const validation = commentRequestSchema.safeParse(parsed);
+  if (!validation.success) {
+    logEntry.blocked_reason = "Schema validation failed";
+    logEntry.duration_ms = performance.now() - start;
+    logPostAttempt(logEntry);
+    sendResponse(
+      socket,
+      400,
+      "Bad Request",
+      JSON.stringify({
+        error: "Schema validation failed",
+        details: validation.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+      })
+    );
+    return;
+  }
+
+  const data = validation.data;
+  logEntry.content_length = data.content.length;
+  logEntry.post_id = data.post_id;
+  logEntry.parent_id = data.parent_id;
+
+  // Record activity for anomaly detection (observe-only, never blocks)
+  rotateCycleIfNeeded();
+
+  // Content scanning (reuse existing sanitizer)
+  const scanResult = sanitize(data.content);
+  if (scanResult.sanitized) {
+    logEntry.blocked_reason = `Injection patterns detected: ${scanResult.patterns.join(", ")}`;
+    logEntry.duration_ms = performance.now() - start;
+    logPostAttempt(logEntry);
+    sendResponse(
+      socket,
+      400,
+      "Bad Request",
+      JSON.stringify({
+        error: "Content contains disallowed patterns",
+        patterns: scanResult.patterns,
+      })
+    );
+    return;
+  }
+
+  // Forward to Moltbook
+  try {
+    const moltbookBody: Record<string, string> = { content: data.content };
+    if (data.parent_id) {
+      moltbookBody.parent_id = data.parent_id;
+    }
+
+    const commentUrl = `${MOLTBOOK_BASE_URL}/posts/${data.post_id}/comments`;
+
+    proxyLog({
+      timestamp: new Date().toISOString(),
+      method: "POST",
+      hostname: "moltbook.com",
+      port: 443,
+      path: `/api/v1/posts/${data.post_id}/comments`,
+      allowed: true,
+      sanitized: false,
+      duration_ms: 0,
+    });
+
+    const res = await fetch(commentUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${MOLTBOOK_API_KEY}`,
+        "User-Agent": "DanielsClaw/0.4.0",
+      },
+      body: JSON.stringify(moltbookBody),
+    });
+
+    logEntry.allowed = true;
+    logEntry.moltbook_status = res.status;
+    logEntry.duration_ms = performance.now() - start;
+
+    recordActivity("comment", true);
+
+    const responseBody = await res.text();
+    logPostAttempt(logEntry);
+
+    if (!res.ok) {
+      process.stdout.write(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "warn",
+          component: "post-handler",
+          message: "Moltbook comment error",
+          url: commentUrl,
+          moltbook_status: res.status,
+          moltbook_response: responseBody.slice(0, 1000),
+        }) + "\n"
+      );
+      sendResponse(
+        socket,
+        502,
+        "Bad Gateway",
+        JSON.stringify({ error: "Moltbook returned error", status: res.status, body: responseBody })
+      );
+      return;
+    }
+
+    let responseData: unknown;
+    try {
+      responseData = JSON.parse(responseBody);
+    } catch {
+      responseData = { raw: responseBody };
+    }
+
+    sendResponse(
+      socket,
+      200,
+      "OK",
+      JSON.stringify({ ok: true, moltbook_status: res.status, data: responseData })
+    );
+  } catch (err) {
+    logEntry.duration_ms = performance.now() - start;
+    logEntry.blocked_reason = `Moltbook request failed: ${(err as Error).message}`;
+    logPostAttempt(logEntry);
+    sendResponse(
+      socket,
+      502,
+      "Bad Gateway",
+      JSON.stringify({ error: "Failed to reach Moltbook", message: (err as Error).message })
+    );
+  }
+}
+
 // --- Public Router ---
 
 export async function handlePostRequest(
@@ -449,6 +621,8 @@ export async function handlePostRequest(
     await handlePost(socket, body);
   } else if (path === "/vote") {
     await handleVote(socket, body);
+  } else if (path === "/comment") {
+    await handleComment(socket, body);
   } else {
     sendResponse(socket, 404, "Not Found", JSON.stringify({ error: "Not Found" }));
   }
