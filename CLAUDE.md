@@ -28,6 +28,7 @@ Current version history:
 - v0.7.1 = Remove hard-coded comment cap from SOUL (align with statistical anomaly detection), fix verify.sh timeout with proxy log fallback, run all 390 tests in CI (including e2e)
 - v0.7.2 = Conversation participation tracking (reply detection, response_to field), email summary engagement breakdown (4 types), verify.sh reliability fixes (timeout + set -e), 406 tests
 - v0.7.3 = Remove MVP level system from code/config (collapse to single allowlist.json + parameters.json, :latest image tags), doc cleanup
+- v0.8.0 = Feed diversification (weighted submolt rotation, ~15% exploration, feed_source memory tracking, SOUL submolt awareness), MVP→semver doc cleanup
 
 ## Project Structure
 
