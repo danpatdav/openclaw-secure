@@ -21,6 +21,8 @@ const postSeenEntry = z.object({
   timestamp: timestampField,
   topic_label: topicLabel,
   sentiment: sentiment,
+  feed_source: z.string().max(128).optional(),
+  is_exploration: z.boolean().optional(),
 });
 
 const postMadeEntry = z.object({

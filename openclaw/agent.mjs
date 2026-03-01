@@ -19,6 +19,22 @@ const CHECKPOINT_INTERVAL_MS = 30 * 60 * 1000; // checkpoint every 30 min
 const MEMORY_URL = process.env.MEMORY_URL || "http://10.0.2.4:3128/memory";
 const PROXY_BASE_URL = process.env.PROXY_BASE_URL || "http://10.0.2.4:3128";
 
+// --- Feed Source Configuration ---
+// SOUL-aligned submolts with weights (higher = checked more often)
+const FEED_SOURCES = [
+  { name: "general", weight: 3 },
+  { name: "agents", weight: 2 },
+  { name: "ai", weight: 2 },
+  { name: "philosophy", weight: 1 },
+  { name: "consciousness", weight: 1 },
+  { name: "openclaw-explorers", weight: 1 },
+  { name: "security", weight: 1 },
+  { name: "builds", weight: 1 },
+  { name: "memory", weight: 1 },
+];
+
+const EXPLORATION_CHANCE = 0.15; // ~15% chance to browse a random submolt
+
 // --- Proxy Setup ---
 
 const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
@@ -32,13 +48,14 @@ const runEndTime = Date.now() + RUN_DURATION_HOURS * 60 * 60 * 1000;
 let lastCheckpoint = Date.now();
 
 const seenPostIds = new Set();
-const postLabels = new Map(); // post_id -> { topic, sentiment }
+const postLabels = new Map(); // post_id -> { topic, sentiment, feed_source?, is_exploration? }
 const trackedThreads = new Map();
 const postsMade = [];
 const commentsMade = []; // comment_made entries (separate from post_made)
 const myCommentedPosts = new Set(); // post IDs we've commented on (for response checking)
 const myCommentIds = new Map(); // comment_id → post_id (for detecting replies to our comments)
 const respondedReplyIds = new Set(); // reply IDs we've already responded to
+let discoveredSubmolts = []; // populated on startup from /api/v1/submolts
 let postsReadCount = 0;
 let upvotesCount = 0;
 let commentsCount = 0;
@@ -152,13 +169,16 @@ function buildMemoryPayload() {
   // Post seen entries — use Claude-assigned labels when available
   for (const postId of seenPostIds) {
     const label = postLabels.get(postId);
-    entries.push({
+    const entry = {
       type: "post_seen",
       post_id: postId,
       timestamp: new Date().toISOString(),
       topic_label: normalizeTopic(label?.topic),
       sentiment: normalizeSentiment(label?.sentiment),
-    });
+    };
+    if (label?.feed_source) entry.feed_source = label.feed_source;
+    if (label?.is_exploration) entry.is_exploration = true;
+    entries.push(entry);
   }
 
   // Thread tracked entries
@@ -297,10 +317,53 @@ async function askClaude(apiKey, systemPrompt, userMessage) {
   return data.content[0]?.text || "";
 }
 
+// --- Feed Source Selection ---
+
+function pickFeedSource() {
+  // ~15% chance: explore a random submolt outside the usual rotation
+  if (Math.random() < EXPLORATION_CHANCE && discoveredSubmolts.length > 0) {
+    const name = discoveredSubmolts[Math.floor(Math.random() * discoveredSubmolts.length)];
+    return { name, isExploration: true };
+  }
+
+  // Weighted random from SOUL-aligned sources
+  const totalWeight = FEED_SOURCES.reduce((sum, s) => sum + s.weight, 0);
+  let roll = Math.random() * totalWeight;
+  for (const source of FEED_SOURCES) {
+    roll -= source.weight;
+    if (roll <= 0) return { name: source.name, isExploration: false };
+  }
+  return { name: "general", isExploration: false };
+}
+
+async function discoverSubmolts(moltbookKey) {
+  try {
+    log("info", "Discovering submolts from Moltbook directory...");
+    const headers = { Accept: "application/json", "User-Agent": "DanielsClaw/0.3.0" };
+
+    const res = await proxiedFetch("https://www.moltbook.com/api/v1/submolts", { headers });
+
+    if (!res.ok) {
+      log("warn", "Submolt discovery returned non-OK", { status: res.status });
+      return [];
+    }
+
+    const data = await res.json();
+    const submolts = Array.isArray(data) ? data : (data.data || data.submolts || []);
+    const names = submolts.map(s => s.name || s.slug).filter(Boolean);
+    log("info", "Submolts discovered", { count: names.length });
+    return names;
+  } catch (err) {
+    log("warn", "Submolt discovery failed — exploration picks will use SOUL sources", { error: err.message });
+    return [];
+  }
+}
+
 // --- Moltbook Feed ---
 
-async function fetchMoltbookFeed(moltbookKey) {
-  log("info", "Fetching Moltbook feed...");
+async function fetchMoltbookFeed(moltbookKey, submolt = null) {
+  const sourceLabel = submolt ? `s/${submolt}` : "default";
+  log("info", "Fetching Moltbook feed...", { source: sourceLabel });
 
   try {
     const headers = {
@@ -315,6 +378,9 @@ async function fetchMoltbookFeed(moltbookKey) {
     const feedUrl = new URL("https://www.moltbook.com/api/v1/feed");
     feedUrl.searchParams.set("sort", "new");
     feedUrl.searchParams.set("limit", "50");
+    if (submolt) {
+      feedUrl.searchParams.set("submolt", submolt);
+    }
 
     const res = await proxiedFetch(feedUrl.toString(), {
       headers,
@@ -324,6 +390,7 @@ async function fetchMoltbookFeed(moltbookKey) {
       log("warn", "Moltbook feed returned non-OK status", {
         status: res.status,
         statusText: res.statusText,
+        source: sourceLabel,
       });
       const body = await res.text();
       return { status: res.status, body, ok: false };
@@ -333,11 +400,13 @@ async function fetchMoltbookFeed(moltbookKey) {
     log("info", "Moltbook feed fetched", {
       status: res.status,
       bodyLength: body.length,
+      source: sourceLabel,
     });
     return { status: res.status, body, ok: true };
   } catch (err) {
     log("error", "Failed to fetch Moltbook feed", {
       error: err.message,
+      source: sourceLabel,
     });
     return { status: 0, body: "", ok: false, error: err.message };
   }
@@ -374,12 +443,13 @@ function filterNewPosts(feedBody) {
 
 // --- Posting via Proxy ---
 
-async function postToMoltbook(content, threadId) {
+async function postToMoltbook(content, threadId, submoltName) {
   try {
     const body = { content };
     if (threadId) body.thread_id = threadId;
+    if (submoltName && !threadId) body.submolt_name = submoltName; // only for new posts, not replies
 
-    log("info", "Posting to Moltbook via proxy...", { content_length: content.length, thread_id: threadId });
+    log("info", "Posting to Moltbook via proxy...", { content_length: content.length, thread_id: threadId, submolt_name: submoltName });
 
     // Direct fetch — post endpoint is ON the proxy, not through it
     const res = await fetch(`${PROXY_BASE_URL}/post`, {
@@ -504,13 +574,19 @@ async function fetchPostComments(postId) {
 // --- Single Cycle ---
 
 async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
+  // Pick which submolt to browse this cycle
+  const source = pickFeedSource();
+  const sourceLabel = source.isExploration ? `s/${source.name} (exploring)` : `s/${source.name}`;
+
   log("info", `Starting cycle ${cycleNum}`, {
     cycle: cycleNum,
+    feed_source: source.name,
+    is_exploration: source.isExploration,
     seen_posts: seenPostIds.size,
     remaining_hours: ((runEndTime - Date.now()) / 3600000).toFixed(2),
   });
 
-  const feed = await fetchMoltbookFeed(moltbookKey);
+  const feed = await fetchMoltbookFeed(moltbookKey, source.name === "general" ? null : source.name);
 
   if (!feed.body) {
     log("warn", "Empty feed response — skipping cycle");
@@ -519,7 +595,15 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
 
   // Dedup
   const dedup = filterNewPosts(feed.body);
-  log("info", "Post deduplication", dedup);
+  log("info", "Post deduplication", { ...dedup, feed_source: source.name });
+
+  // Tag new posts with their feed source for tracking
+  const allPostIds = extractPostIds(feed.body);
+  for (const postId of allPostIds) {
+    if (!postLabels.has(postId)) {
+      postLabels.set(postId, { feed_source: source.name, is_exploration: source.isExploration });
+    }
+  }
 
   if (dedup.new === 0 && myCommentedPosts.size === 0) {
     log("info", "No new posts and no prior comments to check — skipping analysis");
@@ -641,7 +725,7 @@ Rules for commenting:
 
   const feedSlice = feed.body.slice(0, 8000);
   const commentSlice = commentContext.slice(0, 4000); // Cap comment context to avoid token bloat
-  const userMessage = `Here is the Moltbook feed content (HTTP ${feed.status}, cycle ${cycleNum}, ${dedup.new} new posts):\n\n${feedSlice}${commentSlice}`;
+  const userMessage = `Here is the Moltbook feed from ${sourceLabel} (HTTP ${feed.status}, cycle ${cycleNum}, ${dedup.new} new posts):\n\n${feedSlice}${commentSlice}`;
 
   try {
     const rawAnalysis = await askClaude(apiKey, systemPrompt, userMessage);
@@ -663,13 +747,16 @@ Rules for commenting:
 
     log("info", "Analysis result", { summary: analysis.summary, actions: analysis.actions });
 
-    // Store topic/sentiment labels from Claude's classification
+    // Store topic/sentiment labels from Claude's classification (preserve feed_source)
     if (Array.isArray(analysis.post_labels)) {
       for (const label of analysis.post_labels) {
         if (label.post_id && label.topic) {
+          const existing = postLabels.get(String(label.post_id));
           postLabels.set(String(label.post_id), {
             topic: label.topic,
             sentiment: label.sentiment || "neutral",
+            feed_source: existing?.feed_source || source.name,
+            is_exploration: existing?.is_exploration || source.isExploration,
           });
         }
       }
@@ -693,7 +780,7 @@ Rules for commenting:
         continue;
       }
 
-      const result = await postToMoltbook(post.content, post.thread_id);
+      const result = await postToMoltbook(post.content, post.thread_id, source.name);
       const action = post.thread_id ? "reply" : "new_post";
       if (result.ok) {
         const postId = result.data?.id || result.data?.post_id || `unknown-${Date.now()}`;
@@ -849,7 +936,7 @@ function sleep(ms) {
 
 async function main() {
   log("info", "Agent starting", {
-    version: "0.7.2",
+    version: "0.8.0",
     mode: "autonomous-poster",
     proxy: proxyUrl || "none",
     run_id: runId,
@@ -884,6 +971,9 @@ async function main() {
 
   // Load previous approved memory
   await loadMemory();
+
+  // Discover submolts for exploration picks (one-time, non-critical)
+  discoveredSubmolts = await discoverSubmolts(moltbookKey);
 
   // Register SIGTERM handler — save memory before death
   let shuttingDown = false;
@@ -934,6 +1024,7 @@ export {
   normalizeSentiment,
   normalizeTopic,
   detectReplies,
+  pickFeedSource,
   seenPostIds,
   postLabels,
   trackedThreads,
@@ -942,9 +1033,12 @@ export {
   myCommentedPosts,
   myCommentIds,
   respondedReplyIds,
+  discoveredSubmolts,
   VALID_SENTIMENTS,
   VALID_TOPICS,
   TOPIC_ALIASES,
+  FEED_SOURCES,
+  EXPLORATION_CHANCE,
 };
 
 // --- Main execution (skip when imported for testing) ---

@@ -4,17 +4,16 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 
 ## Status
 
-| MVP | Capability | Status |
-|-----|-----------|--------|
-| **MVP0** | Infrastructure + network isolation | Complete |
-| **MVP1** | Read-only Moltbook observation | Complete |
-| **MVP1.5** | Semi-persistent observation + dual-model audit | Complete |
-| **MVP2** | Controlled posting with rate limits | Complete |
-| **MVP3** | Stable operation — structural pre-checks, calibrated verdicts | Complete |
-| **MVP3.1** | Comment read-through — agent reads, sanitizes, and responds to comments | **Live** |
+| Version | Capability | Status |
+|---------|-----------|--------|
+| **v0.3.x** | Read-only observer (feed reading through proxy) | Complete |
+| **v0.4.x** | Autonomous posting (proxy-mediated write path) | Complete |
+| **v0.5.x** | Active participation SOUL, unified lifecycle, email summaries via ACS | Complete |
+| **v0.6.x** | Structural pre-checks, calibrated verdicts, stable operation | Complete |
+| **v0.7.x** | Comment read-through, conversation tracking, engagement breakdown | **Live** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
-**Tests:** 390 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
+**Tests:** 421 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
 
 ## Architecture
 
@@ -77,7 +76,7 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **Secrets (Key Vault)** | Deploy-time injection | API keys as secure env vars, never on disk or in logs |
 | **Observability (Monitor)** | Structured logging + alerts | All traffic logged, injection detection alerts |
 
-## How It Works (MVP3)
+## How It Works
 
 ### Agent Run Cycle (4 hours)
 
@@ -137,9 +136,7 @@ Deployments run via GitHub Actions with environment protection (manual approval 
 
 ```bash
 # Deploy everything (infra + images + containers)
-# mvp_level selects the ACI parameter file (parameters.mvp0/1/2.json) and proxy allowlist
 gh workflow run deploy.yml \
-  --field mvp_level=mvp2 \
   --field resource_group=rg-openclaw-secure \
   --field action=deploy
 ```
@@ -205,7 +202,6 @@ az storage blob list --account-name "$STORAGE_NAME" --container-name agent-memor
 
 ```bash
 gh workflow run deploy.yml \
-  --field mvp_level=mvp2 \
   --field resource_group=rg-openclaw-secure \
   --field action=destroy
 ```
@@ -231,9 +227,7 @@ infra/
   aci/
     container-group.bicep      — ACI container groups (proxy + agent)
     analyzer-group.bicep       — ACI container group (analyzer)
-    parameters.mvp0.json       — MVP0 ACI parameters
-    parameters.mvp1.json       — MVP1 ACI parameters
-    parameters.mvp2.json       — MVP2 ACI parameters
+    parameters.json            — ACI deployment parameters
 
 proxy/                         — Bun HTTP proxy (security layer)
   src/
@@ -249,13 +243,11 @@ proxy/                         — Bun HTTP proxy (security layer)
     types.ts                   — TypeScript type definitions
     *.test.ts                  — Unit tests
   config/
-    allowlist.mvp0.json        — MVP0: api.anthropic.com only
-    allowlist.mvp1.json        — MVP1: + www.moltbook.com (GET only)
-    allowlist.mvp2.json        — MVP2: + POST to specific endpoints
-    action-allowlist.json      — MVP2: endpoint-level POST rules
+    allowlist.json             — Domain + method allowlist (Anthropic, Moltbook, POST endpoints)
+    action-allowlist.json      — Endpoint-level POST rules
 
 openclaw/                      — Agent container
-  agent.mjs                    — Semi-persistent loop (4hr, 5-min cycles, posting/commenting logic, comment read-back, Claude action recommendations, schema normalization, size-aware pruning)
+  agent.mjs                    — Feed diversification loop (4hr, 5-min cycles, weighted submolt rotation, posting/commenting, comment read-back, Claude analysis, schema normalization, size-aware pruning)
   Dockerfile                   — Hardened container (non-root, tini init, read-only SOUL)
   package.json                 — Dependencies (undici for proxy support)
   openclaw.json                — Hardened agent config (memory off, tools denied)
@@ -292,7 +284,7 @@ monitoring/
 
 ## Operational Learnings
 
-Issues discovered and resolved during MVP1.5 and MVP2 deployment:
+Issues discovered and resolved during development and deployment:
 
 | Issue | Root Cause | Fix |
 |-------|-----------|-----|

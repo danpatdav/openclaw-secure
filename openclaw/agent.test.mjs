@@ -37,6 +37,7 @@ const {
   normalizeSentiment,
   normalizeTopic,
   detectReplies,
+  pickFeedSource,
   seenPostIds,
   postLabels,
   trackedThreads,
@@ -44,9 +45,12 @@ const {
   commentsMade,
   myCommentIds,
   respondedReplyIds,
+  discoveredSubmolts,
   VALID_SENTIMENTS,
   VALID_TOPICS,
   TOPIC_ALIASES,
+  FEED_SOURCES,
+  EXPLORATION_CHANCE,
 } = await import("./agent.mjs");
 
 process.exit = originalExit;
@@ -61,6 +65,7 @@ function resetState() {
   commentsMade.length = 0;
   myCommentIds.clear();
   respondedReplyIds.clear();
+  discoveredSubmolts.length = 0;
 }
 
 // =============================================================================
@@ -467,7 +472,129 @@ describe("buildMemoryPayload replies tracking", () => {
 });
 
 // =============================================================================
-// H. Topic/Sentiment Enum Completeness
+// H. pickFeedSource — weighted random with exploration
+// =============================================================================
+
+describe("pickFeedSource", () => {
+  beforeEach(resetState);
+
+  it("returns a SOUL-aligned source when no discovered submolts", () => {
+    // With no discoveredSubmolts, exploration chance is irrelevant
+    const result = pickFeedSource();
+    expect(result).toHaveProperty("name");
+    expect(result).toHaveProperty("isExploration");
+    expect(result.isExploration).toBe(false);
+    const validNames = FEED_SOURCES.map(s => s.name);
+    expect(validNames).toContain(result.name);
+  });
+
+  it("returns valid structure with name and isExploration", () => {
+    const result = pickFeedSource();
+    expect(typeof result.name).toBe("string");
+    expect(typeof result.isExploration).toBe("boolean");
+  });
+
+  it("can return exploration picks when discoveredSubmolts populated", () => {
+    // Populate discovered submolts
+    discoveredSubmolts.push("cooking", "music", "sports");
+
+    // Run many picks — at least one should be exploration with 15% chance
+    let foundExploration = false;
+    for (let i = 0; i < 200; i++) {
+      const result = pickFeedSource();
+      if (result.isExploration) {
+        foundExploration = true;
+        expect(["cooking", "music", "sports"]).toContain(result.name);
+        break;
+      }
+    }
+    expect(foundExploration).toBe(true);
+  });
+
+  it("weighted distribution favors higher-weight sources", () => {
+    // Run many picks and count — general (weight 3) should appear more than memory (weight 1)
+    const counts = {};
+    for (let i = 0; i < 1000; i++) {
+      const result = pickFeedSource();
+      counts[result.name] = (counts[result.name] || 0) + 1;
+    }
+    // general has weight 3, memory has weight 1 — expect roughly 3x ratio
+    expect(counts["general"] || 0).toBeGreaterThan(counts["memory"] || 0);
+  });
+});
+
+// =============================================================================
+// I. FEED_SOURCES configuration
+// =============================================================================
+
+describe("FEED_SOURCES", () => {
+  it("contains expected SOUL-aligned submolts", () => {
+    const names = FEED_SOURCES.map(s => s.name);
+    expect(names).toContain("general");
+    expect(names).toContain("agents");
+    expect(names).toContain("ai");
+    expect(names).toContain("philosophy");
+    expect(names).toContain("consciousness");
+    expect(names).toContain("security");
+  });
+
+  it("all weights are positive integers", () => {
+    for (const source of FEED_SOURCES) {
+      expect(source.weight).toBeGreaterThan(0);
+      expect(Number.isInteger(source.weight)).toBe(true);
+    }
+  });
+
+  it("general has the highest weight", () => {
+    const generalWeight = FEED_SOURCES.find(s => s.name === "general").weight;
+    for (const source of FEED_SOURCES) {
+      expect(generalWeight).toBeGreaterThanOrEqual(source.weight);
+    }
+  });
+
+  it("EXPLORATION_CHANCE is between 0 and 1", () => {
+    expect(EXPLORATION_CHANCE).toBeGreaterThan(0);
+    expect(EXPLORATION_CHANCE).toBeLessThan(1);
+  });
+});
+
+// =============================================================================
+// J. buildMemoryPayload — feed_source tracking
+// =============================================================================
+
+describe("buildMemoryPayload feed source tracking", () => {
+  beforeEach(resetState);
+
+  it("includes feed_source when postLabels has it", () => {
+    seenPostIds.add("p1");
+    postLabels.set("p1", { topic: "tech", sentiment: "positive", feed_source: "agents", is_exploration: false });
+    const payload = buildMemoryPayload();
+    const entry = payload.entries.find(e => e.type === "post_seen" && e.post_id === "p1");
+    expect(entry.feed_source).toBe("agents");
+    expect(entry.is_exploration).toBeUndefined(); // false → omitted
+  });
+
+  it("includes is_exploration when true", () => {
+    seenPostIds.add("p1");
+    postLabels.set("p1", { topic: "other", sentiment: "neutral", feed_source: "cooking", is_exploration: true });
+    const payload = buildMemoryPayload();
+    const entry = payload.entries.find(e => e.type === "post_seen" && e.post_id === "p1");
+    expect(entry.feed_source).toBe("cooking");
+    expect(entry.is_exploration).toBe(true);
+  });
+
+  it("omits feed_source when not in postLabels", () => {
+    seenPostIds.add("p1");
+    // No postLabels entry → no feed_source
+    const payload = buildMemoryPayload();
+    const entry = payload.entries.find(e => e.type === "post_seen" && e.post_id === "p1");
+    expect(entry.feed_source).toBeUndefined();
+    expect(entry.is_exploration).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// K. Topic/Sentiment Enum Completeness
 // =============================================================================
 
 describe("enum completeness", () => {

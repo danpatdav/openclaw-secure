@@ -11,10 +11,10 @@ All release tags use **semver**: `vMAJOR.MINOR.PATCH`
 Tag every successful deployment. Use `git tag vX.Y.Z <commit> -m "description"` with annotated tags.
 
 Current version history:
-- v0.3.x = MVP1/MVP1.5 (read-only observer)
-- v0.4.x = MVP2 (autonomous posting via proxy-mediated write path)
+- v0.3.x = Read-only observer (feed reading through proxy)
+- v0.4.x = Autonomous posting (proxy-mediated write path)
 - v0.5.x = Active participation SOUL, unified lifecycle, email summaries via ACS
-- v0.6.0 = MVP3 (structural pre-checks, calibrated verdicts, stable operation)
+- v0.6.0 = Structural pre-checks, calibrated verdicts, stable operation
 - v0.6.1 = Memory normalization, size-aware pruning, rate limits replaced with statistical anomaly detection
 - v0.6.2 = Analyzer upgraded to GPT-4.1, removed obsolete rate limit pre-checks from analyzer
 - v0.6.3 = Post-schema and anomaly-detection unit tests, E2E proxy attack taxonomy tests
@@ -27,6 +27,7 @@ Current version history:
 - v0.7.0 = Comment read-through (proxy fetches/sanitizes Moltbook comments), comment_made memory type, agent reads comments before deciding, SOUL commenting guidelines
 - v0.7.1 = Remove hard-coded comment cap from SOUL (align with statistical anomaly detection), fix verify.sh timeout with proxy log fallback, run all 390 tests in CI (including e2e)
 - v0.7.2 = Conversation participation tracking (reply detection, response_to field), email summary engagement breakdown (4 types), verify.sh reliability fixes (timeout + set -e), 406 tests
+- v0.7.3 = Remove MVP level system from code/config (collapse to single allowlist.json + parameters.json, :latest image tags), doc cleanup
 
 ## Project Structure
 
@@ -77,10 +78,10 @@ Update documentation after every successful milestone (new semver tag):
 ## Testing
 
 ```bash
-cd proxy && bun test       # 255 tests across 12 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader)
+cd proxy && bun test       # 259 tests across 12 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader)
 cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
-cd openclaw && bun test    # 45 tests across 1 file (agent pure functions + reply detection)
-# Total: 406 tests — all run in CI
+cd openclaw && bun test    # 56 tests across 1 file (agent pure functions, reply detection, feed source rotation)
+# Total: 421 tests — all run in CI
 ```
 
 ## Deployment

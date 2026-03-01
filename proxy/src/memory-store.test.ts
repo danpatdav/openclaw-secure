@@ -193,6 +193,61 @@ describe("memory schema validation", () => {
     expect(result.success).toBe(false);
   });
 
+  test("accepts post_seen with feed_source field", () => {
+    const valid = {
+      ...validMemory,
+      entries: [{
+        type: "post_seen" as const,
+        post_id: "post-123",
+        timestamp: "2026-03-01T00:00:00Z",
+        topic_label: "ai_safety" as const,
+        sentiment: "positive" as const,
+        feed_source: "agents",
+      }],
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts post_seen with is_exploration field", () => {
+    const valid = {
+      ...validMemory,
+      entries: [{
+        type: "post_seen" as const,
+        post_id: "post-123",
+        timestamp: "2026-03-01T00:00:00Z",
+        topic_label: "other" as const,
+        sentiment: "neutral" as const,
+        feed_source: "cooking",
+        is_exploration: true,
+      }],
+    };
+    const result = validateMemory(valid);
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts post_seen without feed_source (backward compat)", () => {
+    // Existing entries without feed_source should still validate
+    const result = validateMemory(validMemory);
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects post_seen with feed_source exceeding 128 chars", () => {
+    const invalid = {
+      ...validMemory,
+      entries: [{
+        type: "post_seen" as const,
+        post_id: "post-123",
+        timestamp: "2026-03-01T00:00:00Z",
+        topic_label: "ai_safety" as const,
+        sentiment: "positive" as const,
+        feed_source: "a".repeat(129),
+      }],
+    };
+    const result = validateMemory(invalid);
+    expect(result.success).toBe(false);
+  });
+
   test("accepts stats with replies_received field", () => {
     const valid = {
       ...validMemory,
