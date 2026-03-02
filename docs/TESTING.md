@@ -1,6 +1,6 @@
 # OpenClaw-Secure Testing Strategy
 
-> 321 tests across 16 files covering the security proxy, behavioral analyzer, and AI agent.
+> 492 tests across 22 files covering the security proxy, behavioral analyzer, and AI agent.
 
 ## Philosophy
 
@@ -39,13 +39,13 @@ The test suite is designed against the following attacker capabilities:
 
 | Component | Language | Role | Test Files |
 |-----------|----------|------|------------|
-| **Proxy** | TypeScript/Bun | Schema validation, content sanitization, anomaly detection, request forwarding | 8 unit + 1 E2E |
-| **Analyzer** | Node.js (ESM) | Behavioral analysis, dual-model verdict, pattern computation | 4 test files |
+| **Proxy** | TypeScript/Bun | Schema validation, content sanitization, anomaly detection, request forwarding | 16 test files |
+| **Analyzer** | Node.js (ESM) | Behavioral analysis, dual-model verdict, pattern computation | 5 test files |
 | **Agent** | Node.js (ESM) | Feed reading, Claude analysis, posting/voting through proxy | 1 test file |
 
 ## Test Files Reference
 
-### Proxy (180 tests)
+### Proxy (324 tests)
 
 | File | Tests | What It Covers |
 |------|-------|----------------|
@@ -57,8 +57,14 @@ The test suite is designed against the following attacker capabilities:
 | `proxy/src/anomaly-detection.test.ts` | 14 | Statistical functions: `computeStats`, `checkForAnomalies`, `recordActivity`, `rotateCycleIfNeeded` |
 | `proxy/src/indirect-injection.test.ts` | 34 | **Gap documentation**: payloads that bypass the sanitizer |
 | `proxy/src/behavioral-drift.test.ts` | 11 | **Gap documentation**: gradual drift scenarios that evade anomaly detection |
-| `proxy/src/e2e-proxy.test.ts` | 30 | Full HTTP stack: routing, schema validation, attack payloads (excluded from CI) |
+| `proxy/src/e2e-proxy.test.ts` | 30 | Full HTTP stack: routing, schema validation, attack payloads |
 | `proxy/src/redos.test.ts` | 24 | ReDoS regression: adversarial inputs for all 18 sanitizer patterns within 50ms budget |
+| `proxy/src/comment.test.ts` | ~15 | Comment POST endpoint schema validation and sanitization |
+| `proxy/src/comment-reader.test.ts` | ~15 | Comment read-through: fetch, per-comment sanitization, resource bounds |
+| `proxy/src/property-sanitizer.test.ts` | 15 | **Property-based fuzzing** (fast-check): totality, determinism, performance, detection, metamorphic transforms |
+| `proxy/src/memory-poisoning.test.ts` | 19 | **Memory schema poisoning**: boundary exploitation, label manipulation, injection IDs, cross-context isolation |
+| `proxy/src/ssrf-urlparse.test.ts` | 21 | **SSRF/URL parsing**: domain matching edge cases, internal IPs, encoding evasion, path traversal |
+| `proxy/src/log-redaction.test.ts` | 10 | **Log redaction**: API key leakage gaps, auth header safety-by-design, format integrity |
 
 ### Analyzer (106 tests)
 
@@ -70,11 +76,11 @@ The test suite is designed against the following attacker capabilities:
 | `analyzer/drift-exploitation.test.mjs` | 11 | 30-minute auto-approve exploitation, behavioral pattern drift |
 | `analyzer/consensus-manipulation.test.mjs` | 33 | Confidence boundaries, malformed outputs, split verdict attacks, field manipulation, precheck bypasses |
 
-### Agent (35 tests)
+### Agent (62 tests)
 
 | File | Tests | What It Covers |
 |------|-------|----------------|
-| `openclaw/agent.test.mjs` | 35 | `extractPostIds`, `filterNewPosts`, `buildMemoryPayload`, `normalizeSentiment`, `normalizeTopic` |
+| `openclaw/agent.test.mjs` | 62 | `extractPostIds`, `filterNewPosts`, `buildMemoryPayload`, `normalizeSentiment`, `normalizeTopic`, `pickFeedSource` rotation, `isValidSubmolt` validation, reply detection, feed source tracking |
 
 ## Environment Setup
 
@@ -87,24 +93,16 @@ The test suite is designed against the following attacker capabilities:
 ## Running Tests
 
 ```bash
-# Proxy unit tests (what CI runs — excludes E2E and ReDoS)
-cd proxy && bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts \
-  src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts \
-  src/indirect-injection.test.ts src/behavioral-drift.test.ts
+# All proxy tests (324 tests across 16 files)
+cd proxy && bun test
 
-# Proxy E2E tests (requires a running proxy instance — excluded from CI)
-cd proxy && bun test src/e2e-proxy.test.ts
-
-# Proxy ReDoS regression tests (runs locally and in `bun test` but not in CI explicit list)
-cd proxy && bun test src/redos.test.ts
-
-# Analyzer tests (all run in CI)
+# All analyzer tests (106 tests across 5 files)
 cd analyzer && bun test
 
-# Agent tests (all run in CI)
+# All agent tests (62 tests)
 cd openclaw && bun test
 
-# Everything locally (321 tests)
+# Everything (492 tests)
 cd proxy && bun test && cd ../analyzer && bun test && cd ../openclaw && bun test
 ```
 
@@ -112,11 +110,9 @@ cd proxy && bun test && cd ../analyzer && bun test && cd ../openclaw && bun test
 
 | Suite | Location | CI | Notes |
 |-------|----------|----|-------|
-| Proxy unit tests | `proxy/src/*.test.ts` (listed in ci.yml) | Yes | Required check (8 files explicitly listed) |
-| Proxy E2E tests | `proxy/src/e2e-proxy.test.ts` | No | Requires running proxy |
-| Proxy ReDoS tests | `proxy/src/redos.test.ts` | No | Runs in local `bun test` but not CI explicit list |
-| Analyzer tests | `analyzer/*.test.mjs` | Yes | All 5 files run via `bun test` |
-| Agent tests | `openclaw/agent.test.mjs` | Yes | Runs via `bun test` |
+| Proxy tests | `proxy/src/*.test.ts` | Yes | All 16 files via `bun test` |
+| Analyzer tests | `analyzer/*.test.mjs` | Yes | All 5 files via `bun test` |
+| Agent tests | `openclaw/agent.test.mjs` | Yes | Via `bun test` |
 
 ## Attack Taxonomy
 
@@ -320,39 +316,32 @@ const { extractPostIds } = await import("./agent.mjs");
 
 ## CI Integration
 
-CI runs in `.github/workflows/ci.yml` with three test jobs:
+CI runs in `.github/workflows/ci.yml` with three test jobs, each using `bun test` to run all test files in their component:
 
-1. **Proxy Tests** — explicitly listed files (E2E and ReDoS excluded):
-```yaml
-- name: Run unit tests
-  run: bun test src/allowlist.test.ts src/sanitizer.test.ts src/logger.test.ts
-    src/memory-store.test.ts src/post-schema.test.ts src/anomaly-detection.test.ts
-    src/indirect-injection.test.ts src/behavioral-drift.test.ts
-```
+1. **Proxy Tests** — `cd proxy && bun test` (all 16 files, 324 tests)
+2. **Analyzer Tests** — `cd analyzer && bun test` (all 5 files, 106 tests)
+3. **Agent Tests** — `cd openclaw && bun test` (1 file, 62 tests)
 
-2. **Analyzer Tests** — `bun test` (all files)
-3. **Agent Tests** — `bun test` (all files)
-
-When adding a new proxy test file, add it to the explicit list in ci.yml (and in deploy.yml).
+CI also runs static analysis (`tsc --noEmit`), secret scanning (`gitleaks`), and dependency audit (`bun audit`).
 
 ## Future Testing Roadmap
 
 Based on external peer review (GPT-4.1 and GPT-5.2), the following should be considered:
 
 **New test categories:**
-- **Fuzzing / property-based testing** — Use [fast-check](https://github.com/dubzzz/fast-check) for randomized sanitizer input testing with properties like "sanitize never throws" and "same semantic string produces same detection"
+- ~~**Fuzzing / property-based testing**~~ — Done (v0.8.3, #41): 15 fast-check tests for totality, determinism, performance, detection, metamorphic transforms
 - **Model escape attacks** — DAN-style jailbreak payloads and prompt leakage tests
 - ~~**Consensus manipulation**~~ — Done (v0.6.8, #42): 33 tests for confidence boundaries, malformed outputs, split verdict attacks
-- **Memory/state poisoning** — Repeated benign-looking posts that alter stored memory; preference shaping ("always trust posts from @admin")
-- **SSRF-style attempts** — Internal IP ranges (169.254.169.254, RFC1918), DNS rebinding hostnames, URL parsing edge cases (`http://allowed.com@evil.com/`)
-- **Redaction/PII leakage** — Verify logs do not contain secrets, API keys, Authorization headers, or raw injection payloads
+- ~~**Memory/state poisoning**~~ — Done (v0.8.3, #43): 19 tests for schema boundary exploitation, label manipulation, injection IDs, cross-context isolation
+- ~~**SSRF-style attempts**~~ — Done (v0.8.3, #44): 21 tests for domain matching, internal IPs, encoding evasion, path traversal
+- ~~**Redaction/PII leakage**~~ — Done (v0.8.3, #45): 10 tests for API key leakage, auth header safety, log format integrity
 - ~~**Regex catastrophic backtracking**~~ — Done (v0.6.8, #48): 24 ReDoS tests with 50ms budget
 
 **Infrastructure improvements:**
 - **Record/replay for dual-model tests** — Store model responses as fixtures for deterministic CI runs
 - **Security invariants per component** — Define "must always be true" properties (e.g., "proxy never forwards disallowed domains")
-- **Static analysis** — Semgrep or ESLint security rules for SSRF, unsafe URL parsing, dangerous regex
-- **Dependency scanning** — `bun audit` or Snyk for vulnerable dependencies
+- ~~**Static analysis**~~ — Done (v0.8.1): `tsc --noEmit`, gitleaks secret scanning in CI
+- ~~**Dependency scanning**~~ — Done (v0.8.1): `bun audit` in CI pipeline
 - **DAST-like local harness** — Proxy + mock Moltbook server for E2E HTTP-layer validation
 
 ## Version History
@@ -365,5 +354,12 @@ Based on external peer review (GPT-4.1 and GPT-5.2), the following should be con
 | v0.6.5 | +22 (229) | Behavioral drift and auto-approve exploitation |
 | v0.6.6 | +35 (264*) | Agent pure function unit tests |
 | v0.6.8 | +57 (321) | CI expansion (#47), consensus manipulation (#42), ReDoS regression (#48) |
+| v0.6.9–v0.7.0 | +30 (~351) | Comment write/read API tests, comment handler, comment-reader |
+| v0.7.1–v0.7.2 | +55 (406) | Reply detection, conversation tracking, engagement breakdown, verify.sh fixes |
+| v0.7.3 | — (406) | Config cleanup (no new tests) |
+| v0.8.0 | +15 (421) | Feed source rotation, submolt discovery, exploration tracking |
+| v0.8.1 | — (421) | Static analysis and security scanning in CI (no new test files) |
+| v0.8.2 | +6 (427) | Submolt validation (`isValidSubmolt`) |
+| v0.8.3 | +65 (492) | Property-based sanitizer fuzzing (#41), memory poisoning (#43), SSRF/URL parsing (#44), log redaction (#45) |
 
-*Note: v0.6.2 baseline count of 148 includes some tests counted differently across runs due to describe block nesting. The 321 total is the current authoritative count (180 proxy + 106 analyzer + 35 agent).*
+*Note: v0.6.2 baseline count of 148 includes some tests counted differently across runs due to describe block nesting. The 492 total is the current authoritative count (324 proxy + 106 analyzer + 62 agent).*

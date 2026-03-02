@@ -10,10 +10,11 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **v0.4.x** | Autonomous posting (proxy-mediated write path) | Complete |
 | **v0.5.x** | Active participation SOUL, unified lifecycle, email summaries via ACS | Complete |
 | **v0.6.x** | Structural pre-checks, calibrated verdicts, stable operation | Complete |
-| **v0.7.x** | Comment read-through, conversation tracking, engagement breakdown | **Live** |
+| **v0.7.x** | Comment read-through, conversation tracking, engagement breakdown | Complete |
+| **v0.8.x** | Feed diversification, targeted posting, security hardening tests | **Live** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
-**Tests:** 421 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
+**Tests:** 492 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
 
 ## Architecture
 
@@ -80,8 +81,8 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 
 ### Agent Run Cycle (4 hours)
 
-1. Agent loads last approved memory from proxy (`GET /memory/latest`), including tracked commented posts
-2. Agent loops: fetch Moltbook feed → deduplicate posts → fetch comments on previously-commented posts (check for replies) → fetch comments on new posts (understand context) → analyze with Claude (feed + comment context) → Claude recommends actions (replies, upvotes, comments) → execute through proxy endpoints → save memory
+1. Agent loads last approved memory from proxy (`GET /memory/latest`), discovers available submolts from Moltbook API
+2. Each cycle picks a feed source via weighted random selection from SOUL-aligned submolts (~85%) or random exploration (~15%). Agent fetches that submolt's feed → deduplicates posts → fetches comments on previously-commented posts (check for replies) → fetches comments on new posts (understand context) → analyzes with Claude (feed + comment + submolt context) → Claude recommends actions (replies, upvotes, comments, targeted new posts) → executes through proxy endpoints → saves memory with feed_source tracking
 3. Agent normalizes Claude's labels to valid schema enums before memory save (e.g., "tech" → "technical", "mixed" → "neutral")
 4. Memory saves go through proxy (`POST /memory`) → Zod schema validation → Blob Storage. Size-aware pruning trims oldest `post_seen` entries to stay under 900KB. Comments tracked as `comment_made` entries for conversation continuity
 5. Proxy records activity per 5-minute cycle; statistical anomaly detection (2σ, observe-only) flags unusual posting/voting/commenting patterns without blocking
@@ -105,21 +106,21 @@ Memory files are strictly validated — no freeform text fields:
 
 ```json
 {
-  "version": 2,
+  "version": 1,
   "run_id": "uuid-cp1",
   "run_start": "ISO8601",
   "run_end": "ISO8601",
   "entries": [
-    { "type": "post_seen", "post_id": "str", "timestamp": "ISO8601", "topic_label": "enum", "sentiment": "enum" },
-    { "type": "post_made", "post_id": "str", "thread_id": "str", "timestamp": "ISO8601", "action": "enum", "content": "str", "status": "enum" },
-    { "type": "comment_made", "post_id": "str", "comment_id": "str?", "parent_id": "str?", "timestamp": "ISO8601", "content": "str?" },
+    { "type": "post_seen", "post_id": "str", "timestamp": "ISO8601", "topic_label": "enum", "sentiment": "enum", "feed_source": "str?", "is_exploration": "bool?" },
+    { "type": "post_made", "post_id": "str", "thread_id": "str", "timestamp": "ISO8601", "action": "enum" },
+    { "type": "comment_made", "post_id": "str", "comment_id": "str?", "parent_id": "str?", "response_to": "str?", "timestamp": "ISO8601", "content": "str?" },
     { "type": "thread_tracked", "thread_id": "str", "topic_label": "enum", "first_seen": "ISO8601", "last_interaction": "ISO8601" }
   ],
-  "stats": { "posts_read": 0, "posts_made": 0, "upvotes": 0, "comments": 0, "threads_tracked": 0 }
+  "stats": { "posts_read": 0, "posts_made": 0, "upvotes": 0, "comments": 0, "replies_received": 0, "threads_tracked": 0 }
 }
 ```
 
-**Fixed enums:** `topic_label` (Claude-assigned per post, not hardcoded — e.g., ai_safety, agent_design, moltbook_meta, social, technical), `sentiment` (positive, neutral, negative), `action` (reply, new_post, upvote, comment), `status` (sent, rate_limited, failed).
+**Fixed enums:** `topic_label` (Claude-assigned per post — ai_safety, agent_design, moltbook_meta, social, technical, other), `sentiment` (positive, neutral, negative), `action` (reply, new_post, upvote, comment).
 
 ## Quick Start
 
