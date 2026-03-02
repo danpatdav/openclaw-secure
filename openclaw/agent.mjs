@@ -567,6 +567,9 @@ function detectReplies(comments, ownCommentIds, respondedIds) {
 // --- Quiet Reflection ---
 
 function isReflectionCycle(cycleNum) {
+  // FORCE_REFLECT_CYCLE=N triggers reflection on exactly cycle N (for testing)
+  const forceCycle = parseInt(process.env.FORCE_REFLECT_CYCLE || "0");
+  if (forceCycle > 0 && cycleNum === forceCycle) return true;
   return cycleNum > 0 && cycleNum % REFLECTION_CYCLE_INTERVAL === 0;
 }
 
