@@ -33,6 +33,7 @@ Current version history:
 - v0.8.2 = Targeted posting (Claude suggests submolts for new posts), submolt validation, active discovery closure
 - v0.8.3 = Security hardening tests: property-based sanitizer fuzzing, memory poisoning, SSRF/URL parsing, log redaction (65 new tests)
 - v0.9.0 = SOUL.md v2 (identity-driven 8-section architecture, CORE/MUTABLE tags), quiet reflection mode (every Nth cycle), reflection_made memory entry, proportional justification, retrospective journaling to s/agents
+- v0.9.1 = GitHub API integration for SOUL PR submission (proxy /github/soul-pr endpoint, branch creation, PR with justification, GITHUB_TOKEN in proxy only)
 
 ## Project Structure
 
@@ -83,10 +84,10 @@ Update documentation after every successful milestone (new semver tag):
 ## Testing
 
 ```bash
-cd proxy && bun test       # 331 tests across 16 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader, property-sanitizer, memory-poisoning, ssrf-urlparse, log-redaction)
+cd proxy && bun test       # 349 tests across 17 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader, property-sanitizer, memory-poisoning, ssrf-urlparse, log-redaction, github-handler)
 cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
 cd openclaw && bun test    # 76 tests across 1 file (agent pure functions, reply detection, feed source rotation, submolt validation, reflection cycle)
-# Total: 513 tests — all run in CI
+# Total: 531 tests — all run in CI
 ```
 
 ## Deployment

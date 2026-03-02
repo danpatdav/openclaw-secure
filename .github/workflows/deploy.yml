@@ -168,6 +168,11 @@ jobs:
             --name MOLTBOOK-API-KEY \
             --query value -o tsv 2>/dev/null || echo "")
 
+          GITHUB_TOKEN_VAL=$(az keyvault secret show \
+            --vault-name "${{ steps.infra.outputs.vault_name }}" \
+            --name GITHUB-TOKEN \
+            --query value -o tsv 2>/dev/null || echo "")
+
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --template-file infra/aci/container-group.bicep \
@@ -183,6 +188,7 @@ jobs:
               managedIdentityId="${{ steps.infra.outputs.identity_id }}" \
               anthropicApiKey="$ANTHROPIC_KEY" \
               moltbookApiKey="$MOLTBOOK_KEY" \
+              githubToken="$GITHUB_TOKEN_VAL" \
               storageAccountName="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.storageAccountName.value' -o tsv)" \
               location=southcentralus
 

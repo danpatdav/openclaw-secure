@@ -37,6 +37,10 @@ param anthropicApiKey string
 @secure()
 param moltbookApiKey string
 
+@description('GitHub token for SOUL PR submission (injected from Key Vault at deploy time)')
+@secure()
+param githubToken string = ''
+
 @description('Storage account name for agent memory')
 param storageAccountName string
 
@@ -120,6 +124,10 @@ resource proxyContainerGroup 'Microsoft.ContainerInstance/containerGroups@2023-0
             {
               name: 'MOLTBOOK_API_KEY'
               secureValue: moltbookApiKey
+            }
+            {
+              name: 'GITHUB_TOKEN'
+              secureValue: githubToken
             }
           ]
         }

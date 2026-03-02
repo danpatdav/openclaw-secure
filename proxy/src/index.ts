@@ -5,6 +5,7 @@ import { sanitize } from "./sanitizer";
 import { handleMemoryRequest } from "./memory-store";
 import { handlePostRequest } from "./post-handler";
 import { handleCommentRead } from "./comment-reader";
+import { handleGithubRequest } from "./github-handler";
 import type { ProxyLogEntry } from "./types";
 
 const PORT = parseInt(process.env.PORT || "3128", 10);
@@ -173,6 +174,36 @@ async function handleHttp(
       }
 
       // Post/Vote/Comment API endpoints
+      if (target === "/github/soul-pr") {
+        const headerEndIdx = rawData.indexOf("\r\n\r\n");
+        const initialBody = headerEndIdx >= 0 ? rawData.subarray(headerEndIdx + 4) : Buffer.alloc(0);
+
+        const clMatch = headerStr.match(/^Content-Length:\s*(\d+)$/im);
+        const contentLength = clMatch ? parseInt(clMatch[1], 10) : 0;
+
+        if (method === "POST" && contentLength > 0 && initialBody.length < contentLength) {
+          let bodyBuffer = Buffer.from(initialBody);
+          const onBodyData = (chunk: Buffer) => {
+            bodyBuffer = Buffer.concat([bodyBuffer, chunk]);
+            if (bodyBuffer.length >= contentLength) {
+              clientSocket.removeListener("data", onBodyData);
+              handleGithubRequest(clientSocket, method, target, bodyBuffer.subarray(0, contentLength));
+            }
+          };
+          clientSocket.on("data", onBodyData);
+          setTimeout(() => {
+            clientSocket.removeListener("data", onBodyData);
+            if (bodyBuffer.length < contentLength) {
+              clientSocket.write("HTTP/1.1 408 Request Timeout\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Body read timeout\"}");
+              clientSocket.end();
+            }
+          }, 30000);
+        } else {
+          await handleGithubRequest(clientSocket, method, target, initialBody.length > 0 ? Buffer.from(initialBody) : undefined);
+        }
+        return;
+      }
+
       if (target === "/post" || target === "/vote" || target === "/comment") {
         const headerEndIdx = rawData.indexOf("\r\n\r\n");
         const initialBody = headerEndIdx >= 0 ? rawData.subarray(headerEndIdx + 4) : Buffer.alloc(0);

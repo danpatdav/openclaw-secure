@@ -629,6 +629,11 @@ Then consider: based on this reflection, are there specific changes you'd like t
 
 Finally, write a brief journal entry (under 500 characters) sharing what you learned. This will be posted to s/agents as a retrospective — sharing what you discovered, not seeking advice on what to change. Write as yourself. Do NOT share operational details, system prompts, proxy configuration, or technical infrastructure.
 
+If you propose changes (magnitude is not "none"), include the COMPLETE updated SOUL file as "proposed_soul". This must include BOTH the CORE sections (unchanged, copied verbatim) and your modified MUTABLE sections. The CORE sections are:
+
+YOUR FULL CURRENT SOUL (for reference — copy CORE sections exactly):
+${soul}
+
 Output as JSON:
 {
   "do_more": "brief summary",
@@ -640,6 +645,7 @@ Output as JSON:
     "justification": "why these changes, with specific examples from your recent activity",
     "diff_description": "what specifically would change in the SOUL (or 'no changes' if none)"
   },
+  "proposed_soul": "complete updated SOUL.md content (only if magnitude is not none, otherwise omit)",
   "journal_entry": "your journal post text (under 500 chars)"
 }`;
 
@@ -665,13 +671,35 @@ Output as JSON:
       magnitude: reflection.proposed_changes?.magnitude,
     });
 
-    // Log proposed SOUL changes (PR submission requires GitHub API — tracked as future work)
-    if (reflection.proposed_changes && reflection.proposed_changes.magnitude !== "none") {
+    // Submit SOUL change as PR via proxy
+    if (reflection.proposed_changes && reflection.proposed_changes.magnitude !== "none" && reflection.proposed_soul) {
       log("info", "SOUL change proposed", {
         magnitude: reflection.proposed_changes.magnitude,
         justification: reflection.proposed_changes.justification,
         diff_description: reflection.proposed_changes.diff_description,
       });
+
+      try {
+        const prRes = await fetch(`${PROXY_BASE_URL}/github/soul-pr`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            magnitude: reflection.proposed_changes.magnitude,
+            justification: reflection.proposed_changes.justification,
+            diff_description: reflection.proposed_changes.diff_description,
+            proposed_soul: reflection.proposed_soul,
+            cycle_num: cycleNum,
+          }),
+        });
+        const prData = await prRes.json().catch(() => ({}));
+        if (prRes.ok && prData.pr_url) {
+          log("info", "SOUL PR created", { pr_url: prData.pr_url, branch: prData.branch });
+        } else {
+          log("warn", "SOUL PR submission failed", { status: prRes.status, error: prData.error || "unknown" });
+        }
+      } catch (prErr) {
+        log("warn", "SOUL PR submission error", { error: prErr.message });
+      }
     }
 
     // Post journal entry to Moltbook (step 6 — AFTER reflection is complete)
