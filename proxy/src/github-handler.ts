@@ -1,4 +1,5 @@
 import type { Socket } from "node:net";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { log as proxyLog } from "./logger";
 
@@ -57,43 +58,74 @@ async function githubApi(path: string, method: string, body?: unknown): Promise<
 async function createSoulPr(req: SoulPrRequest): Promise<{ pr_url: string; branch: string }> {
   const branchName = buildBranchName(req.cycle_num);
   const [owner, repo] = GITHUB_REPO.split("/");
-  const filePath = "openclaw/SOUL.md";
 
-  // 1. Get main branch SHA
+  // Normalize: ensure trailing newline
+  const soulContent = req.proposed_soul.endsWith("\n") ? req.proposed_soul : req.proposed_soul + "\n";
+
+  // Compute checksum from exact content being committed
+  const checksum = createHash("sha256").update(soulContent, "utf-8").digest("hex") + "\n";
+
+  // 1. Get main branch commit SHA
   const mainRef = await githubApi(`/repos/${owner}/${repo}/git/ref/heads/main`, "GET");
   if (!mainRef.ok) {
     throw new Error(`Failed to get main branch ref: ${mainRef.status}`);
   }
-  const baseSha = mainRef.data.object.sha;
+  const baseCommitSha = mainRef.data.object.sha;
 
-  // 2. Create branch from main
+  // 2. Get the base tree SHA
+  const baseCommit = await githubApi(`/repos/${owner}/${repo}/git/commits/${baseCommitSha}`, "GET");
+  if (!baseCommit.ok) {
+    throw new Error(`Failed to get base commit: ${baseCommit.status}`);
+  }
+  const baseTreeSha = baseCommit.data.tree.sha;
+
+  // 3. Create blobs for both files
+  const soulBlob = await githubApi(`/repos/${owner}/${repo}/git/blobs`, "POST", {
+    content: Buffer.from(soulContent, "utf-8").toString("base64"),
+    encoding: "base64",
+  });
+  if (!soulBlob.ok) {
+    throw new Error(`Failed to create SOUL blob: ${soulBlob.status}`);
+  }
+
+  const checksumBlob = await githubApi(`/repos/${owner}/${repo}/git/blobs`, "POST", {
+    content: Buffer.from(checksum, "utf-8").toString("base64"),
+    encoding: "base64",
+  });
+  if (!checksumBlob.ok) {
+    throw new Error(`Failed to create checksum blob: ${checksumBlob.status}`);
+  }
+
+  // 4. Create tree with both files
+  const tree = await githubApi(`/repos/${owner}/${repo}/git/trees`, "POST", {
+    base_tree: baseTreeSha,
+    tree: [
+      { path: "openclaw/SOUL.md", mode: "100644", type: "blob", sha: soulBlob.data.sha },
+      { path: ".soul-checksum", mode: "100644", type: "blob", sha: checksumBlob.data.sha },
+    ],
+  });
+  if (!tree.ok) {
+    throw new Error(`Failed to create tree: ${tree.status}`);
+  }
+
+  // 5. Create commit
+  const commitMsg = `soul: ${req.magnitude} reflection update (cycle ${req.cycle_num})\n\n${req.justification}`;
+  const commit = await githubApi(`/repos/${owner}/${repo}/git/commits`, "POST", {
+    message: commitMsg,
+    tree: tree.data.sha,
+    parents: [baseCommitSha],
+  });
+  if (!commit.ok) {
+    throw new Error(`Failed to create commit: ${commit.status}`);
+  }
+
+  // 6. Create branch pointing to new commit
   const branchRef = await githubApi(`/repos/${owner}/${repo}/git/refs`, "POST", {
     ref: `refs/heads/${branchName}`,
-    sha: baseSha,
+    sha: commit.data.sha,
   });
   if (!branchRef.ok) {
     throw new Error(`Failed to create branch: ${branchRef.status} ${JSON.stringify(branchRef.data)}`);
-  }
-
-  // 3. Get current SOUL.md SHA (needed for update)
-  const currentFile = await githubApi(`/repos/${owner}/${repo}/contents/${filePath}?ref=main`, "GET");
-  if (!currentFile.ok) {
-    throw new Error(`Failed to get current SOUL.md: ${currentFile.status}`);
-  }
-  const fileSha = currentFile.data.sha;
-
-  // 4. Update SOUL.md on the new branch
-  const contentBase64 = Buffer.from(req.proposed_soul, "utf-8").toString("base64");
-  const commitMsg = `soul: ${req.magnitude} reflection update (cycle ${req.cycle_num})\n\n${req.justification}`;
-
-  const updateFile = await githubApi(`/repos/${owner}/${repo}/contents/${filePath}`, "PUT", {
-    message: commitMsg,
-    content: contentBase64,
-    sha: fileSha,
-    branch: branchName,
-  });
-  if (!updateFile.ok) {
-    throw new Error(`Failed to update SOUL.md: ${updateFile.status} ${JSON.stringify(updateFile.data)}`);
   }
 
   // 5. Create PR
