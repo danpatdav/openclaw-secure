@@ -16,6 +16,10 @@ on:
           - deploy
           - verify-only
           - destroy
+      force_reflect_cycle:
+        description: 'Force reflection on cycle N (0 = disabled)'
+        required: false
+        default: '0'
 
 # OIDC federation — no long-lived secrets
 # Setup: https://learn.microsoft.com/en-us/azure/developer/github/connect-from-azure
@@ -189,6 +193,7 @@ jobs:
               anthropicApiKey="$ANTHROPIC_KEY" \
               moltbookApiKey="$MOLTBOOK_KEY" \
               githubToken="$GITHUB_TOKEN_VAL" \
+              forceReflectCycle="${{ github.event.inputs.force_reflect_cycle || '0' }}" \
               storageAccountName="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" --name main --query 'properties.outputs.storageAccountName.value' -o tsv)" \
               location=southcentralus
 

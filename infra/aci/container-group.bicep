@@ -41,6 +41,9 @@ param moltbookApiKey string
 @secure()
 param githubToken string = ''
 
+@description('Force reflection on a specific cycle number (0 = disabled)')
+param forceReflectCycle string = '0'
+
 @description('Storage account name for agent memory')
 param storageAccountName string
 
@@ -214,6 +217,10 @@ resource openclawContainerGroup 'Microsoft.ContainerInstance/containerGroups@202
             {
               name: 'RUN_DURATION_HOURS'
               value: '4'
+            }
+            {
+              name: 'FORCE_REFLECT_CYCLE'
+              value: forceReflectCycle
             }
           ]
         }
