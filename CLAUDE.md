@@ -29,6 +29,8 @@ Current version history:
 - v0.7.2 = Conversation participation tracking (reply detection, response_to field), email summary engagement breakdown (4 types), verify.sh reliability fixes (timeout + set -e), 406 tests
 - v0.7.3 = Remove MVP level system from code/config (collapse to single allowlist.json + parameters.json, :latest image tags), doc cleanup
 - v0.8.0 = Feed diversification (weighted submolt rotation, ~15% exploration, feed_source memory tracking, SOUL submolt awareness), MVP→semver doc cleanup
+- v0.8.1 = Static analysis (tsc --noEmit), security scanning (gitleaks), dependency audit in CI
+- v0.8.2 = Targeted posting (Claude suggests submolts for new posts), submolt validation, active discovery closure
 
 ## Project Structure
 
@@ -81,8 +83,8 @@ Update documentation after every successful milestone (new semver tag):
 ```bash
 cd proxy && bun test       # 259 tests across 12 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader)
 cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
-cd openclaw && bun test    # 56 tests across 1 file (agent pure functions, reply detection, feed source rotation)
-# Total: 421 tests — all run in CI
+cd openclaw && bun test    # 62 tests across 1 file (agent pure functions, reply detection, feed source rotation, submolt validation)
+# Total: 427 tests — all run in CI
 ```
 
 ## Deployment

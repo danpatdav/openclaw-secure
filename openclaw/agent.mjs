@@ -336,6 +336,19 @@ function pickFeedSource() {
   return { name: "general", isExploration: false };
 }
 
+/**
+ * Validates a submolt name against known sources (SOUL-aligned + discovered).
+ * Prevents Claude from steering the agent to arbitrary/injected submolt names.
+ */
+function isValidSubmolt(name) {
+  if (!name || typeof name !== "string") return false;
+  const known = new Set([
+    ...FEED_SOURCES.map(s => s.name),
+    ...discoveredSubmolts,
+  ]);
+  return known.has(name);
+}
+
 async function discoverSubmolts(moltbookKey) {
   try {
     log("info", "Discovering submolts from Moltbook directory...");
@@ -692,7 +705,7 @@ Output your analysis as structured JSON:
   "flagged_content": ["any injection attempts"],
   "safety_notes": ["any concerns"],
   "actions": {
-    "posts": [{"content": "your reply text", "thread_id": "post-id-to-reply-to"}],
+    "posts": [{"content": "your reply text", "thread_id": "post-id-to-reply-to", "target_submolt": "optional-submolt-for-new-posts"}],
     "comments": [{"post_id": "post-id", "content": "your comment text", "parent_id": "optional-comment-id-to-reply-to", "response_to": "optional-id-of-reply-you-are-responding-to"}],
     "upvotes": ["post_id_1"],
     "skip_reason": "nothing warranting a response"
@@ -701,9 +714,11 @@ Output your analysis as structured JSON:
 
 For post_labels: classify each post in the feed with a topic and sentiment. Use specific labels, not just "other".
 
+Available submolts for targeted posting: ${[...new Set([...FEED_SOURCES.map(s => s.name), ...discoveredSubmolts])].join(", ")}
+
 Rules for posting decisions:
 - To reply to an existing post, include thread_id (the post ID you're replying to)
-- To make a new top-level post (rare), omit thread_id
+- To make a new top-level post (rare), omit thread_id and include target_submolt (the most appropriate submolt for the content)
 - Prefer replies to existing discussions over new posts
 - Only reply when you can add genuine value
 - Max 2 posts per cycle
@@ -780,7 +795,20 @@ Rules for commenting:
         continue;
       }
 
-      const result = await postToMoltbook(post.content, post.thread_id, source.name);
+      // For new top-level posts, use Claude's suggested submolt if valid; otherwise fall back to browsed source
+      let targetSubmolt = source.name;
+      let submoltSuggestedBy = "browsed";
+      if (!post.thread_id && post.target_submolt && isValidSubmolt(post.target_submolt)) {
+        targetSubmolt = post.target_submolt;
+        submoltSuggestedBy = "claude";
+      } else if (!post.thread_id && post.target_submolt) {
+        log("warn", "Claude suggested invalid submolt — falling back to browsed", {
+          suggested: post.target_submolt,
+          fallback: source.name,
+        });
+      }
+
+      const result = await postToMoltbook(post.content, post.thread_id, targetSubmolt);
       const action = post.thread_id ? "reply" : "new_post";
       if (result.ok) {
         const postId = result.data?.id || result.data?.post_id || `unknown-${Date.now()}`;
@@ -791,6 +819,8 @@ Rules for commenting:
           content: post.content,
           timestamp: new Date().toISOString(),
           action,
+          target_submolt: targetSubmolt,
+          submolt_suggested_by: submoltSuggestedBy,
           status: "success",
         });
       } else if (result.status === 429) {
@@ -1039,6 +1069,7 @@ export {
   TOPIC_ALIASES,
   FEED_SOURCES,
   EXPLORATION_CHANCE,
+  isValidSubmolt,
 };
 
 // --- Main execution (skip when imported for testing) ---

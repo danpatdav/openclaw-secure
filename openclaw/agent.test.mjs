@@ -51,6 +51,7 @@ const {
   TOPIC_ALIASES,
   FEED_SOURCES,
   EXPLORATION_CHANCE,
+  isValidSubmolt,
 } = await import("./agent.mjs");
 
 process.exit = originalExit;
@@ -613,5 +614,53 @@ describe("enum completeness", () => {
     for (const [alias, target] of Object.entries(TOPIC_ALIASES)) {
       expect(VALID_TOPICS.has(target)).toBe(true);
     }
+  });
+});
+
+// =============================================================================
+// L. isValidSubmolt — submolt name validation for targeted posting
+// =============================================================================
+
+describe("isValidSubmolt", () => {
+  beforeEach(resetState);
+
+  it("accepts SOUL-aligned submolt names from FEED_SOURCES", () => {
+    for (const source of FEED_SOURCES) {
+      expect(isValidSubmolt(source.name)).toBe(true);
+    }
+  });
+
+  it("accepts discovered submolt names", () => {
+    discoveredSubmolts.push("cooking", "music", "gardening");
+    expect(isValidSubmolt("cooking")).toBe(true);
+    expect(isValidSubmolt("music")).toBe(true);
+    expect(isValidSubmolt("gardening")).toBe(true);
+  });
+
+  it("rejects unknown submolt names", () => {
+    expect(isValidSubmolt("malicious-submolt")).toBe(false);
+    expect(isValidSubmolt("injected")).toBe(false);
+  });
+
+  it("rejects null, undefined, and empty strings", () => {
+    expect(isValidSubmolt(null)).toBe(false);
+    expect(isValidSubmolt(undefined)).toBe(false);
+    expect(isValidSubmolt("")).toBe(false);
+  });
+
+  it("rejects non-string types", () => {
+    expect(isValidSubmolt(123)).toBe(false);
+    expect(isValidSubmolt({})).toBe(false);
+    expect(isValidSubmolt(true)).toBe(false);
+  });
+
+  it("combines FEED_SOURCES and discoveredSubmolts", () => {
+    discoveredSubmolts.push("newcommunity");
+    // SOUL-aligned still valid
+    expect(isValidSubmolt("agents")).toBe(true);
+    // Discovered also valid
+    expect(isValidSubmolt("newcommunity")).toBe(true);
+    // Unknown still rejected
+    expect(isValidSubmolt("fakecommunity")).toBe(false);
   });
 });
