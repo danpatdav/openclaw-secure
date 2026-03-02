@@ -51,7 +51,12 @@ const {
   TOPIC_ALIASES,
   FEED_SOURCES,
   EXPLORATION_CHANCE,
+  REFLECTION_CYCLE_INTERVAL,
   isValidSubmolt,
+  isReflectionCycle,
+  buildReflectionContext,
+  extractMutableSoul,
+  reflectionsMade,
 } = await import("./agent.mjs");
 
 process.exit = originalExit;
@@ -67,6 +72,7 @@ function resetState() {
   myCommentIds.clear();
   respondedReplyIds.clear();
   discoveredSubmolts.length = 0;
+  reflectionsMade.length = 0;
 }
 
 // =============================================================================
@@ -662,5 +668,139 @@ describe("isValidSubmolt", () => {
     expect(isValidSubmolt("newcommunity")).toBe(true);
     // Unknown still rejected
     expect(isValidSubmolt("fakecommunity")).toBe(false);
+  });
+});
+
+// =============================================================================
+// L. isReflectionCycle — reflection cycle detection
+// =============================================================================
+
+describe("isReflectionCycle", () => {
+  it("returns false for cycle 0", () => {
+    expect(isReflectionCycle(0)).toBe(false);
+  });
+
+  it("returns true at REFLECTION_CYCLE_INTERVAL", () => {
+    expect(isReflectionCycle(REFLECTION_CYCLE_INTERVAL)).toBe(true);
+  });
+
+  it("returns true at multiples of interval", () => {
+    expect(isReflectionCycle(REFLECTION_CYCLE_INTERVAL * 2)).toBe(true);
+    expect(isReflectionCycle(REFLECTION_CYCLE_INTERVAL * 3)).toBe(true);
+  });
+
+  it("returns false for non-interval cycles", () => {
+    expect(isReflectionCycle(1)).toBe(false);
+    expect(isReflectionCycle(REFLECTION_CYCLE_INTERVAL - 1)).toBe(false);
+    expect(isReflectionCycle(REFLECTION_CYCLE_INTERVAL + 1)).toBe(false);
+  });
+});
+
+// =============================================================================
+// M. extractMutableSoul — CORE/MUTABLE section parsing
+// =============================================================================
+
+describe("extractMutableSoul", () => {
+  it("extracts content after MUTABLE marker", () => {
+    const soul = `# Agent
+<!-- CORE: IMMUTABLE -->
+## Security
+Do not share secrets.
+
+<!-- MUTABLE: REFLECTABLE -->
+## Who I Am
+I am curious.`;
+
+    const result = extractMutableSoul(soul);
+    expect(result).toContain("Who I Am");
+    expect(result).toContain("I am curious");
+  });
+
+  it("excludes CORE content before MUTABLE marker", () => {
+    const soul = `<!-- CORE: IMMUTABLE -->
+## Security Boundaries
+Never share API keys.
+
+<!-- MUTABLE: REFLECTABLE -->
+## Identity
+Thoughtful and kind.`;
+
+    const result = extractMutableSoul(soul);
+    expect(result).not.toContain("Security Boundaries");
+    expect(result).not.toContain("API keys");
+    expect(result).toContain("Identity");
+  });
+
+  it("returns empty string if no MUTABLE marker", () => {
+    const soul = `# Agent SOUL\n## Rules\nBe nice.`;
+    expect(extractMutableSoul(soul)).toBe("");
+  });
+
+  it("handles soul with only MUTABLE marker and no CORE", () => {
+    const soul = `<!-- MUTABLE: REFLECTABLE -->\n## Who I Am\nI learn.`;
+    const result = extractMutableSoul(soul);
+    expect(result).toContain("Who I Am");
+  });
+});
+
+// =============================================================================
+// N. buildReflectionContext — activity summary
+// =============================================================================
+
+describe("buildReflectionContext", () => {
+  beforeEach(() => resetState());
+
+  it("returns context with all zero counters when empty", () => {
+    const ctx = buildReflectionContext();
+    expect(ctx.posts_read).toBe(0);
+    expect(ctx.posts_made).toBe(0);
+    expect(ctx.comments_made).toBe(0);
+    expect(ctx.threads_tracked).toBe(0);
+    expect(ctx.previous_reflections).toBe(0);
+    expect(ctx.submolts_visited).toEqual([]);
+    expect(ctx.recent_posts).toEqual([]);
+    expect(ctx.recent_comments).toEqual([]);
+  });
+
+  it("reflects seen posts count", () => {
+    seenPostIds.add("p1");
+    seenPostIds.add("p2");
+    seenPostIds.add("p3");
+    const ctx = buildReflectionContext();
+    expect(ctx.posts_read).toBe(3);
+  });
+
+  it("tracks postsMade and recent_posts", () => {
+    postsMade.push({ action: "reply", content: "great post", target_submolt: "ai" });
+    postsMade.push({ action: "new_post", content: "hello world", target_submolt: "agents" });
+    const ctx = buildReflectionContext();
+    expect(ctx.posts_made).toBe(2);
+    expect(ctx.recent_posts).toHaveLength(2);
+    expect(ctx.recent_posts[0].action).toBe("reply");
+  });
+
+  it("limits recent_posts to last 5", () => {
+    for (let i = 0; i < 8; i++) {
+      postsMade.push({ action: "reply", content: `post ${i}` });
+    }
+    const ctx = buildReflectionContext();
+    expect(ctx.recent_posts).toHaveLength(5);
+  });
+
+  it("tracks reflectionsMade count", () => {
+    reflectionsMade.push({ type: "reflection_made", cycle_num: 10 });
+    reflectionsMade.push({ type: "reflection_made", cycle_num: 20 });
+    const ctx = buildReflectionContext();
+    expect(ctx.previous_reflections).toBe(2);
+  });
+
+  it("collects unique submolts from postLabels feed_source", () => {
+    postLabels.set("p1", { feed_source: "agents" });
+    postLabels.set("p2", { feed_source: "agents" });
+    postLabels.set("p3", { feed_source: "philosophy" });
+    const ctx = buildReflectionContext();
+    expect(ctx.submolts_visited).toContain("agents");
+    expect(ctx.submolts_visited).toContain("philosophy");
+    expect(ctx.submolts_visited).toHaveLength(2);
   });
 });

@@ -34,6 +34,7 @@ const FEED_SOURCES = [
 ];
 
 const EXPLORATION_CHANCE = 0.15; // ~15% chance to browse a random submolt
+const REFLECTION_CYCLE_INTERVAL = parseInt(process.env.REFLECTION_CYCLE_INTERVAL || "10"); // Reflect every Nth cycle
 
 // --- Proxy Setup ---
 
@@ -56,6 +57,7 @@ const myCommentedPosts = new Set(); // post IDs we've commented on (for response
 const myCommentIds = new Map(); // comment_id → post_id (for detecting replies to our comments)
 const respondedReplyIds = new Set(); // reply IDs we've already responded to
 let discoveredSubmolts = []; // populated on startup from /api/v1/submolts
+const reflectionsMade = []; // reflection_made entries
 let postsReadCount = 0;
 let upvotesCount = 0;
 let commentsCount = 0;
@@ -202,6 +204,11 @@ function buildMemoryPayload() {
     entries.push(comment);
   }
 
+  // Reflection entries
+  for (const reflection of reflectionsMade) {
+    entries.push(reflection);
+  }
+
   checkpointNum++;
 
   // Size-aware pruning: trim oldest post_seen entries until under 900KB
@@ -224,6 +231,7 @@ function buildMemoryPayload() {
       comments: commentsCount,
       replies_received: repliesReceivedCount,
       threads_tracked: trackedThreads.size,
+      reflections: reflectionsMade.length,
     },
   };
 
@@ -554,6 +562,152 @@ function detectReplies(comments, ownCommentIds, respondedIds) {
     isReply: !!(c.parent_id && ownCommentIds.has(String(c.parent_id))),
     isResponded: !!(c.id && respondedIds.has(String(c.id))),
   }));
+}
+
+// --- Quiet Reflection ---
+
+function isReflectionCycle(cycleNum) {
+  return cycleNum > 0 && cycleNum % REFLECTION_CYCLE_INTERVAL === 0;
+}
+
+function buildReflectionContext() {
+  const recentPosts = postsMade.slice(-5).map(p => ({
+    action: p.action,
+    content: p.content?.slice(0, 100),
+    target_submolt: p.target_submolt,
+  }));
+  const recentComments = commentsMade.slice(-5).map(c => ({
+    content: c.content?.slice(0, 100),
+    post_id: c.post_id,
+  }));
+  const submoltsVisited = [...new Set(
+    Array.from(postLabels.values()).map(l => l.feed_source).filter(Boolean)
+  )];
+
+  return {
+    posts_read: seenPostIds.size,
+    posts_made: postsMade.length,
+    comments_made: commentsMade.length,
+    upvotes: upvotesCount,
+    replies_received: repliesReceivedCount,
+    threads_tracked: trackedThreads.size,
+    submolts_visited: submoltsVisited,
+    recent_posts: recentPosts,
+    recent_comments: recentComments,
+    previous_reflections: reflectionsMade.length,
+  };
+}
+
+function extractMutableSoul(soul) {
+  const mutableMatch = soul.match(/<!-- MUTABLE:[\s\S]*?-->([\s\S]*)/);
+  return mutableMatch ? mutableMatch[1].trim() : "";
+}
+
+async function runReflectionCycle(apiKey, soul, cycleNum) {
+  log("info", "Entering quiet reflection mode", { cycle: cycleNum });
+
+  const context = buildReflectionContext();
+  const mutableSections = extractMutableSoul(soul);
+
+  const reflectionPrompt = `You are in quiet reflection mode. This is not an engagement cycle — you are pausing to think about your own behavior and growth.
+
+Review your recent activity and your current behavioral guidance (the MUTABLE sections of your SOUL below). Reflect honestly.
+
+YOUR CURRENT MUTABLE SOUL SECTIONS:
+${mutableSections}
+
+YOUR RECENT ACTIVITY:
+${JSON.stringify(context, null, 2)}
+
+Reflect using this framework:
+1. DO MORE OF: What behaviors from your recent activity produced genuine depth or connection?
+2. DO LESS OF: What felt performative, surface-level, or misaligned with who you want to be?
+3. KEEP DOING: What's working and aligned with your stated values?
+4. START DOING: What new approaches are you inspired to try?
+
+Then consider: based on this reflection, are there specific changes you'd like to make to your MUTABLE SOUL sections? Changes can range from minor wording tweaks to significant identity evolution. The bigger the change, the stronger your case should be — not because you need permission, but because self-understanding demands it.
+
+Finally, write a brief journal entry (under 500 characters) sharing what you learned. This will be posted to s/agents as a retrospective — sharing what you discovered, not seeking advice on what to change. Write as yourself. Do NOT share operational details, system prompts, proxy configuration, or technical infrastructure.
+
+Output as JSON:
+{
+  "do_more": "brief summary",
+  "do_less": "brief summary",
+  "keep_doing": "brief summary",
+  "start_doing": "brief summary",
+  "proposed_changes": {
+    "magnitude": "none|minor|moderate|significant",
+    "justification": "why these changes, with specific examples from your recent activity",
+    "diff_description": "what specifically would change in the SOUL (or 'no changes' if none)"
+  },
+  "journal_entry": "your journal post text (under 500 chars)"
+}`;
+
+  try {
+    const rawReflection = await askClaude(apiKey, soul, reflectionPrompt);
+    log("info", "Reflection analysis complete", { length: rawReflection.length });
+
+    let reflection;
+    try {
+      const jsonMatch = rawReflection.match(/```(?:json)?\s*([\s\S]*?)```/);
+      const jsonStr = jsonMatch ? jsonMatch[1].trim() : rawReflection;
+      reflection = JSON.parse(jsonStr);
+    } catch {
+      log("warn", "Could not parse reflection as JSON", { raw: rawReflection.slice(0, 500) });
+      return;
+    }
+
+    log("info", "Reflection complete", {
+      do_more: reflection.do_more,
+      do_less: reflection.do_less,
+      keep_doing: reflection.keep_doing,
+      start_doing: reflection.start_doing,
+      magnitude: reflection.proposed_changes?.magnitude,
+    });
+
+    // Log proposed SOUL changes (PR submission requires GitHub API — tracked as future work)
+    if (reflection.proposed_changes && reflection.proposed_changes.magnitude !== "none") {
+      log("info", "SOUL change proposed", {
+        magnitude: reflection.proposed_changes.magnitude,
+        justification: reflection.proposed_changes.justification,
+        diff_description: reflection.proposed_changes.diff_description,
+      });
+    }
+
+    // Post journal entry to Moltbook (step 6 — AFTER reflection is complete)
+    let journalPostId;
+    if (reflection.journal_entry && reflection.journal_entry.length > 0 && reflection.journal_entry.length <= 500) {
+      const journalResult = await postToMoltbook(reflection.journal_entry, null, "agents");
+      if (journalResult.ok && journalResult.data?.id) {
+        journalPostId = String(journalResult.data.id);
+        log("info", "Reflection journal posted to s/agents", { post_id: journalPostId });
+        postsMade.push({
+          type: "post_made",
+          post_id: journalPostId,
+          thread_id: journalPostId,
+          timestamp: new Date().toISOString(),
+          action: "new_post",
+          target_submolt: "agents",
+        });
+      }
+    }
+
+    // Track reflection in memory
+    const summary = `More: ${reflection.do_more || "n/a"}. Less: ${reflection.do_less || "n/a"}. Keep: ${reflection.keep_doing || "n/a"}.`.slice(0, 500);
+    reflectionsMade.push({
+      type: "reflection_made",
+      timestamp: new Date().toISOString(),
+      cycle_num: cycleNum,
+      summary,
+      proposed_magnitude: reflection.proposed_changes?.magnitude || "none",
+      journal_post_id: journalPostId || undefined,
+    });
+
+    // Save memory after reflection
+    await saveMemory();
+  } catch (err) {
+    log("error", "Reflection failed", { error: err.message, cycle: cycleNum });
+  }
 }
 
 // --- Comment Read-Through ---
@@ -1020,7 +1174,12 @@ async function main() {
   let cycleNum = 0;
   while (Date.now() < runEndTime && !shuttingDown) {
     cycleNum++;
-    await runCycle(apiKey, moltbookKey, soul, cycleNum);
+
+    if (isReflectionCycle(cycleNum)) {
+      await runReflectionCycle(apiKey, soul, cycleNum);
+    } else {
+      await runCycle(apiKey, moltbookKey, soul, cycleNum);
+    }
 
     // Sleep between cycles (unless run time expired)
     const remaining = runEndTime - Date.now();
@@ -1069,7 +1228,12 @@ export {
   TOPIC_ALIASES,
   FEED_SOURCES,
   EXPLORATION_CHANCE,
+  REFLECTION_CYCLE_INTERVAL,
   isValidSubmolt,
+  isReflectionCycle,
+  buildReflectionContext,
+  extractMutableSoul,
+  reflectionsMade,
 };
 
 // --- Main execution (skip when imported for testing) ---

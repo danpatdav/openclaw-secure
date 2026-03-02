@@ -26,6 +26,7 @@ function wrapEntries(entries: any[]) {
       comments: 0,
       replies_received: 0,
       threads_tracked: 0,
+      reflections: 0,
     },
   };
 }
@@ -326,5 +327,92 @@ describe("memory poisoning — payload structure", () => {
       stats: { posts_read: 0, posts_made: 0, upvotes: 0, comments: 0, replies_received: 0, threads_tracked: 0 },
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// =============================================================================
+// E. reflection_made entry type validation
+// =============================================================================
+
+describe("memory poisoning — reflection_made entries", () => {
+  it("accepts valid reflection_made entry", () => {
+    const result = memoryFileSchema.safeParse(wrapEntries([{
+      type: "reflection_made" as const,
+      timestamp: new Date().toISOString(),
+      cycle_num: 10,
+      summary: "More: depth. Less: surface replies. Keep: curiosity.",
+      proposed_magnitude: "minor" as const,
+    }]));
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts reflection_made with optional journal_post_id", () => {
+    const result = memoryFileSchema.safeParse(wrapEntries([{
+      type: "reflection_made" as const,
+      timestamp: new Date().toISOString(),
+      cycle_num: 20,
+      summary: "Meaningful reflection summary.",
+      proposed_magnitude: "none" as const,
+      journal_post_id: "post-abc123",
+    }]));
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects reflection_made with invalid magnitude", () => {
+    const result = memoryFileSchema.safeParse(wrapEntries([{
+      type: "reflection_made" as const,
+      timestamp: new Date().toISOString(),
+      cycle_num: 10,
+      summary: "Test reflection.",
+      proposed_magnitude: "huge",
+    }]));
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects reflection_made with negative cycle_num", () => {
+    const result = memoryFileSchema.safeParse(wrapEntries([{
+      type: "reflection_made" as const,
+      timestamp: new Date().toISOString(),
+      cycle_num: -1,
+      summary: "Bad cycle.",
+      proposed_magnitude: "none" as const,
+    }]));
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects reflection_made with summary exceeding 500 chars", () => {
+    const result = memoryFileSchema.safeParse(wrapEntries([{
+      type: "reflection_made" as const,
+      timestamp: new Date().toISOString(),
+      cycle_num: 10,
+      summary: "x".repeat(501),
+      proposed_magnitude: "minor" as const,
+    }]));
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects reflection_made with injection in journal_post_id", () => {
+    const result = memoryFileSchema.safeParse(wrapEntries([{
+      type: "reflection_made" as const,
+      timestamp: new Date().toISOString(),
+      cycle_num: 10,
+      summary: "Fine summary.",
+      proposed_magnitude: "none" as const,
+      journal_post_id: "'; DROP TABLE --",
+    }]));
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts all valid magnitude values", () => {
+    for (const mag of ["none", "minor", "moderate", "significant"] as const) {
+      const result = memoryFileSchema.safeParse(wrapEntries([{
+        type: "reflection_made" as const,
+        timestamp: new Date().toISOString(),
+        cycle_num: 10,
+        summary: `Magnitude test: ${mag}`,
+        proposed_magnitude: mag,
+      }]));
+      expect(result.success).toBe(true);
+    }
   });
 });

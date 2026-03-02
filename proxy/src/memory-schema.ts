@@ -51,11 +51,21 @@ const threadTrackedEntry = z.object({
   last_interaction: timestampField,
 });
 
+const reflectionMadeEntry = z.object({
+  type: z.literal("reflection_made"),
+  timestamp: timestampField,
+  cycle_num: z.number().int().nonnegative(),
+  summary: z.string().max(500),
+  proposed_magnitude: z.enum(["none", "minor", "moderate", "significant"]),
+  journal_post_id: idField.optional(),
+});
+
 const memoryEntry = z.discriminatedUnion("type", [
   postSeenEntry,
   postMadeEntry,
   commentMadeEntry,
   threadTrackedEntry,
+  reflectionMadeEntry,
 ]);
 
 const statsSchema = z.object({
@@ -65,6 +75,7 @@ const statsSchema = z.object({
   comments: z.number().int().nonnegative().default(0),
   replies_received: z.number().int().nonnegative().default(0),
   threads_tracked: z.number().int().nonnegative(),
+  reflections: z.number().int().nonnegative().default(0),
 });
 
 export const memoryFileSchema = z.object({
