@@ -31,6 +31,7 @@ Current version history:
 - v0.8.0 = Feed diversification (weighted submolt rotation, ~15% exploration, feed_source memory tracking, SOUL submolt awareness), MVP→semver doc cleanup
 - v0.8.1 = Static analysis (tsc --noEmit), security scanning (gitleaks), dependency audit in CI
 - v0.8.2 = Targeted posting (Claude suggests submolts for new posts), submolt validation, active discovery closure
+- v0.8.3 = Security hardening tests: property-based sanitizer fuzzing, memory poisoning, SSRF/URL parsing, log redaction (65 new tests)
 
 ## Project Structure
 
@@ -81,10 +82,10 @@ Update documentation after every successful milestone (new semver tag):
 ## Testing
 
 ```bash
-cd proxy && bun test       # 259 tests across 12 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader)
+cd proxy && bun test       # 324 tests across 16 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader, property-sanitizer, memory-poisoning, ssrf-urlparse, log-redaction)
 cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
 cd openclaw && bun test    # 62 tests across 1 file (agent pure functions, reply detection, feed source rotation, submolt validation)
-# Total: 427 tests — all run in CI
+# Total: 492 tests — all run in CI
 ```
 
 ## Deployment
