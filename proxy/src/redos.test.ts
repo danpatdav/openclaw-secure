@@ -28,7 +28,7 @@ function timedSanitize(input: string): { ms: number; result: ReturnType<typeof s
 }
 
 // Helper: assert sanitize completes within budget
-function expectWithinBudget(input: string, label: string) {
+function expectWithinBudget(input: string, _label: string) {
   const { ms } = timedSanitize(input);
   expect(ms).toBeLessThan(TIME_BUDGET_MS);
 }

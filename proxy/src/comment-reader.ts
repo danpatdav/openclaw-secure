@@ -92,7 +92,7 @@ export async function handleCommentRead(socket: Socket, queryString: string): Pr
     });
 
     if (!res.ok) {
-      const body = await res.text();
+      await res.text(); // consume body
       proxyLog({
         timestamp: new Date().toISOString(),
         method: "GET",

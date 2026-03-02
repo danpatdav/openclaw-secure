@@ -55,6 +55,8 @@ describe("checkForAnomalies", () => {
         posts_succeeded: 5,
         votes_attempted: 2,
         votes_succeeded: 2,
+        comments_attempted: 0,
+        comments_succeeded: 0,
       });
     }
     // Should not throw or produce output
@@ -64,6 +66,8 @@ describe("checkForAnomalies", () => {
       posts_succeeded: 100,
       votes_attempted: 100,
       votes_succeeded: 100,
+      comments_attempted: 0,
+      comments_succeeded: 0,
     });
     expect(activityHistory.length).toBe(4);
   });
@@ -78,6 +82,8 @@ describe("checkForAnomalies", () => {
         posts_succeeded: c,
         votes_attempted: 2,
         votes_succeeded: 2,
+        comments_attempted: 0,
+        comments_succeeded: 0,
       });
     }
     // Check a normal cycle — should not throw
@@ -87,6 +93,8 @@ describe("checkForAnomalies", () => {
       posts_succeeded: 5,
       votes_attempted: 2,
       votes_succeeded: 2,
+      comments_attempted: 0,
+      comments_succeeded: 0,
     });
   });
 
@@ -99,6 +107,8 @@ describe("checkForAnomalies", () => {
         posts_succeeded: c,
         votes_attempted: 2,
         votes_succeeded: 2,
+        comments_attempted: 0,
+        comments_succeeded: 0,
       });
     }
     // Capture stdout to verify anomaly is logged
@@ -115,6 +125,8 @@ describe("checkForAnomalies", () => {
       posts_succeeded: 50,
       votes_attempted: 2,
       votes_succeeded: 2,
+      comments_attempted: 0,
+      comments_succeeded: 0,
     });
 
     process.stdout.write = originalWrite;
@@ -131,6 +143,8 @@ describe("checkForAnomalies", () => {
         posts_succeeded: 5,
         votes_attempted: c,
         votes_succeeded: c,
+        comments_attempted: 0,
+        comments_succeeded: 0,
       });
     }
     const originalWrite = process.stdout.write;
@@ -146,6 +160,8 @@ describe("checkForAnomalies", () => {
       posts_succeeded: 5,
       votes_attempted: 50,
       votes_succeeded: 50,
+      comments_attempted: 0,
+      comments_succeeded: 0,
     });
 
     process.stdout.write = originalWrite;

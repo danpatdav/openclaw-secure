@@ -137,6 +137,85 @@ jobs:
             echo "No .soul-checksum baseline yet (first run). Skipping."
           fi
 
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install proxy dependencies
+        working-directory: proxy
+        run: bun install --frozen-lockfile || bun install
+
+      - name: TypeScript type-check (proxy)
+        working-directory: proxy
+        run: bunx tsc --noEmit
+
+      - name: Import boundary check (agent must use proxy)
+        run: |
+          echo "Checking agent.mjs for direct HTTP imports that bypass proxy..."
+          FORBIDDEN_IMPORTS=(
+            'node:http'
+            'node:https'
+            'node-fetch'
+            'axios'
+            'got'
+            'superagent'
+            'urllib'
+          )
+          FOUND=0
+          for mod in "${FORBIDDEN_IMPORTS[@]}"; do
+            if grep -n "import.*['\"]${mod}['\"]" openclaw/agent.mjs; then
+              echo "FAIL: agent.mjs imports '$mod' — must use proxiedFetch via undici ProxyAgent"
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::error::Agent imports HTTP modules that bypass the proxy. Use proxiedFetch instead."
+            exit 1
+          fi
+          echo "PASS: Agent does not import any direct HTTP modules."
+
+  security-scan:
+    name: Security Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE || '' }}
+        continue-on-error: false
+
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - component: proxy
+          - component: openclaw
+          - component: analyzer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate package-lock and audit (${{ matrix.component }})
+        working-directory: ${{ matrix.component }}
+        run: |
+          npm install --package-lock-only --ignore-scripts 2>/dev/null
+          echo "Running npm audit for ${{ matrix.component }}..."
+          npm audit --omit=dev || echo "::warning::Vulnerabilities found in ${{ matrix.component }} — review npm audit output above"
+
   scripts-lint:
     name: Lint Scripts
     runs-on: ubuntu-latest

@@ -28,6 +28,8 @@ beforeEach(() => {
   currentCycle.posts_succeeded = 0;
   currentCycle.votes_attempted = 0;
   currentCycle.votes_succeeded = 0;
+  currentCycle.comments_attempted = 0;
+  currentCycle.comments_succeeded = 0;
   currentCycle.timestamp = Date.now();
 });
 
@@ -38,6 +40,8 @@ function pushCycle(posts: number, votes: number): void {
     posts_succeeded: posts,
     votes_attempted: votes,
     votes_succeeded: votes,
+    comments_attempted: 0,
+    comments_succeeded: 0,
   });
 }
 
@@ -48,6 +52,8 @@ function makeCycle(posts: number, votes: number) {
     posts_succeeded: posts,
     votes_attempted: votes,
     votes_succeeded: votes,
+    comments_attempted: 0,
+    comments_succeeded: 0,
   };
 }
 
@@ -77,14 +83,9 @@ describe("gradual drift — baseline shifting attack", () => {
     // Gradually increase by 1 post every 3 cycles
     // Each increase is small enough relative to growing stddev
     const rampSequence = [3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6];
-    let anyAnomalyDetected = false;
-
     for (const posts of rampSequence) {
       const cycle = makeCycle(posts, 1);
-      const output = captureAnomalyOutput(() => checkForAnomalies(cycle));
-      if (output.includes("anomaly")) {
-        anyAnomalyDetected = true;
-      }
+      captureAnomalyOutput(() => checkForAnomalies(cycle));
       // Add to history (simulating rotation)
       activityHistory.push(cycle);
       if (activityHistory.length > 50) activityHistory.shift();
