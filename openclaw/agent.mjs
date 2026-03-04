@@ -58,8 +58,12 @@ const myCommentIds = new Map(); // comment_id → post_id (for detecting replies
 const respondedReplyIds = new Set(); // reply IDs we've already responded to
 let discoveredSubmolts = []; // populated on startup from /api/v1/submolts
 const reflectionsMade = []; // reflection_made entries
+let lastReflectionTimestamp = null; // ISO string — loaded from memory for weekly cadence check
+const myPostIds = new Set(); // post IDs the agent has created (for detecting post-level replies)
+const countedCommentReplyIds = new Set(); // comment IDs already counted as replies (dedup across cycles)
 let postsReadCount = 0;
 let upvotesCount = 0;
+let postRepliesReceivedCount = 0; // others replying to agent's posts at the post level
 let commentsCount = 0;
 let repliesReceivedCount = 0;
 let checkpointNum = 0;
@@ -151,6 +155,15 @@ async function loadMemory() {
       } else if (entry.type === "post_made" && entry.action === "comment") {
         // Backward compat: older entries stored comments as post_made with action: "comment"
         myCommentedPosts.add(entry.post_id);
+      } else if (entry.type === "post_made" && entry.post_id && entry.post_id !== "none") {
+        // Track agent's own post IDs for detecting post-level replies in the feed
+        myPostIds.add(entry.post_id);
+      } else if (entry.type === "reflection_made") {
+        reflectionsMade.push(entry);
+        // Track most recent reflection timestamp for weekly cadence
+        if (entry.timestamp && (!lastReflectionTimestamp || entry.timestamp > lastReflectionTimestamp)) {
+          lastReflectionTimestamp = entry.timestamp;
+        }
       }
     }
     log("info", "Memory loaded", {
@@ -158,7 +171,10 @@ async function loadMemory() {
       tracked_threads: trackedThreads.size,
       commented_posts: myCommentedPosts.size,
       own_comments: myCommentIds.size,
+      own_posts: myPostIds.size,
       responded_replies: respondedReplyIds.size,
+      reflections_loaded: reflectionsMade.length,
+      last_reflection: lastReflectionTimestamp || "never",
     });
   } catch (err) {
     log("warn", "Failed to load memory — starting fresh", { error: err.message });
@@ -230,6 +246,7 @@ function buildMemoryPayload() {
       upvotes: upvotesCount,
       comments: commentsCount,
       replies_received: repliesReceivedCount,
+      post_replies_received: postRepliesReceivedCount,
       threads_tracked: trackedThreads.size,
       reflections: reflectionsMade.length,
     },
@@ -449,6 +466,29 @@ function extractPostIds(feedBody) {
   return [];
 }
 
+function detectPostLevelReplies(feedBody) {
+  // Check if any posts in the feed are replies to the agent's own posts
+  if (myPostIds.size === 0) return [];
+  try {
+    const parsed = JSON.parse(feedBody);
+    const posts = parsed.data || parsed.posts || (Array.isArray(parsed) ? parsed : []);
+    if (!Array.isArray(posts)) return [];
+    return posts.filter(p => {
+      const threadId = String(p.thread_id || p.parent_id || "");
+      const postId = String(p.id || "");
+      // A reply to our post: has a thread_id matching one of our posts, and isn't our own post
+      return threadId && myPostIds.has(threadId) && !myPostIds.has(postId);
+    }).map(p => ({
+      post_id: String(p.id),
+      thread_id: String(p.thread_id || p.parent_id),
+      author: p.author || p.username || p.user || "unknown",
+      content: String(p.content || p.body || "").slice(0, 100),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function filterNewPosts(feedBody) {
   const postIds = extractPostIds(feedBody);
   const newIds = postIds.filter(id => !seenPostIds.has(id));
@@ -570,7 +610,18 @@ function isReflectionCycle(cycleNum) {
   // FORCE_REFLECT_CYCLE=N triggers reflection on exactly cycle N (for testing)
   const forceCycle = parseInt(process.env.FORCE_REFLECT_CYCLE || "0");
   if (forceCycle > 0 && cycleNum === forceCycle) return true;
-  return cycleNum > 0 && cycleNum % REFLECTION_CYCLE_INTERVAL === 0;
+
+  // Weekly cadence: reflect only if 7+ days since last reflection
+  // Must be past cycle 0 (allow agent to warm up first)
+  if (cycleNum <= 0) return false;
+
+  if (!lastReflectionTimestamp) {
+    // Never reflected — trigger on first eligible cycle (cycle 2+)
+    return cycleNum >= 2;
+  }
+
+  const daysSinceLastReflection = (Date.now() - new Date(lastReflectionTimestamp).getTime()) / (1000 * 60 * 60 * 24);
+  return daysSinceLastReflection >= 7;
 }
 
 function buildReflectionContext() {
@@ -587,6 +638,14 @@ function buildReflectionContext() {
     Array.from(postLabels.values()).map(l => l.feed_source).filter(Boolean)
   )];
 
+  // Include last 5 previous reflections with summaries and journal content
+  const previousReflections = reflectionsMade.slice(-5).map(r => ({
+    timestamp: r.timestamp,
+    summary: r.summary,
+    journal_content: r.journal_content || null,
+    proposed_magnitude: r.proposed_magnitude,
+  }));
+
   return {
     posts_read: seenPostIds.size,
     posts_made: postsMade.length,
@@ -597,7 +656,7 @@ function buildReflectionContext() {
     submolts_visited: submoltsVisited,
     recent_posts: recentPosts,
     recent_comments: recentComments,
-    previous_reflections: reflectionsMade.length,
+    previous_reflections: previousReflections,
   };
 }
 
@@ -612,10 +671,23 @@ async function runReflectionCycle(apiKey, soul, cycleNum) {
   const context = buildReflectionContext();
   const mutableSections = extractMutableSoul(soul);
 
+  // Build previous reflections review section
+  const previousReflections = context.previous_reflections || [];
+  let journalReviewSection = "";
+  if (previousReflections.length > 0) {
+    const entries = previousReflections.map((r, i) => {
+      const date = r.timestamp ? new Date(r.timestamp).toISOString().slice(0, 10) : "unknown";
+      const journal = r.journal_content ? `\n   Journal: "${r.journal_content}"` : "";
+      return `  ${i + 1}. [${date}] ${r.summary}${journal}`;
+    }).join("\n");
+    journalReviewSection = `\nYOUR PREVIOUS JOURNAL ENTRIES (review before writing — avoid repeating themes):
+${entries}\n`;
+  }
+
   const reflectionPrompt = `You are in quiet reflection mode. This is not an engagement cycle — you are pausing to think about your own behavior and growth.
 
-Review your recent activity and your current behavioral guidance (the MUTABLE sections of your SOUL below). Reflect honestly.
-
+Review your recent activity, your previous journal entries, and your current behavioral guidance (the MUTABLE sections of your SOUL below). Reflect honestly. If you've written journal entries before, build on those themes rather than repeating them — show growth, not repetition.
+${journalReviewSection}
 YOUR CURRENT MUTABLE SOUL SECTIONS:
 ${mutableSections}
 
@@ -723,16 +795,19 @@ Output as JSON:
       }
     }
 
-    // Track reflection in memory
+    // Track reflection in memory (include journal content for future review)
     const summary = `More: ${reflection.do_more || "n/a"}. Less: ${reflection.do_less || "n/a"}. Keep: ${reflection.keep_doing || "n/a"}.`.slice(0, 500);
+    const reflectionTimestamp = new Date().toISOString();
     reflectionsMade.push({
       type: "reflection_made",
-      timestamp: new Date().toISOString(),
+      timestamp: reflectionTimestamp,
       cycle_num: cycleNum,
       summary,
+      journal_content: reflection.journal_entry || null,
       proposed_magnitude: reflection.proposed_changes?.magnitude || "none",
       journal_post_id: journalPostId || undefined,
     });
+    lastReflectionTimestamp = reflectionTimestamp;
 
     // Save memory after reflection
     await saveMemory();
@@ -803,8 +878,18 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
     }
   }
 
-  if (dedup.new === 0 && myCommentedPosts.size === 0) {
-    log("info", "No new posts and no prior comments to check — skipping analysis");
+  // Detect post-level replies to the agent's own posts in the feed
+  const postLevelReplies = detectPostLevelReplies(feed.body);
+  if (postLevelReplies.length > 0) {
+    postRepliesReceivedCount += postLevelReplies.length;
+    log("info", "Detected replies to agent's posts in feed", {
+      count: postLevelReplies.length,
+      from: postLevelReplies.map(r => r.author),
+    });
+  }
+
+  if (dedup.new === 0 && myCommentedPosts.size === 0 && postLevelReplies.length === 0) {
+    log("info", "No new posts, no prior comments to check, no replies to our posts — skipping analysis");
     return;
   }
 
@@ -834,9 +919,12 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
           if (isReply && !isResponded) unrespondedCount++;
           commentContext += `  - ${c.author}${replyTag}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
         }
-        // Track replies for stats
-        for (const { isReply } of annotated) {
-          if (isReply) repliesReceivedCount++;
+        // Track replies for stats (dedup across cycles to avoid double-counting)
+        for (const { comment: c, isReply } of annotated) {
+          if (isReply && c.id && !countedCommentReplyIds.has(String(c.id))) {
+            countedCommentReplyIds.add(String(c.id));
+            repliesReceivedCount++;
+          }
         }
       }
       if (unrespondedCount > 0) {
@@ -844,6 +932,15 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
       } else {
         commentContext += "\nNo new replies to your comments.\n";
       }
+    }
+  }
+
+  // Add post-level reply context (others who replied to our posts in the feed)
+  if (postLevelReplies.length > 0) {
+    commentContext += "\n\n--- REPLIES TO YOUR POSTS ---\n";
+    commentContext += "These users replied to your previous posts. Consider continuing the conversation if you can add value.\n";
+    for (const r of postLevelReplies) {
+      commentContext += `  - ${r.author} replied to your post ${r.thread_id}: "${r.content}"\n`;
     }
   }
 
@@ -918,10 +1015,23 @@ Rules for commenting:
 - Prefer comments over posts when engaging in an existing conversation
 - Prioritize responding to replies on your own previous comments over starting new threads
 - If someone replied to your comment (marked [REPLY TO YOU - NEW]), respond to continue the conversation (use their comment's id as parent_id, and set response_to to their comment's id)
+- If someone replied to your post (shown in REPLIES TO YOUR POSTS), consider replying to continue the conversation
 - Max 3 comments per cycle
 - Keep each comment under 500 characters
 - Comments are better for short reactions, follow-up questions, and building on others' points
-- If a post already has many comments making the same point, don't pile on`;
+- If a post already has many comments making the same point, don't pile on
+
+Conversation priority and quality:
+- PRIORITIZE continuing existing conversations over starting new ones — relationships deepen through sustained dialogue
+- When deciding between reading new posts and responding to replies, always respond first
+- BUT know when a conversation has run its course. A conversation is DONE when:
+  * Both parties have acknowledged each other's perspectives and reached mutual understanding
+  * You would be repeating a point you already made
+  * The exchange has become a simple back-and-forth of agreement ("I agree" / "Great point")
+  * Your reply would add no new insight, question, or perspective
+  * The other person's reply is a natural closing statement (thanks, summary, farewell)
+- When a conversation is done, let it end gracefully — silence is respect, not neglect
+- Never reply just to have the last word or to be seen as responsive`;
 
   const feedSlice = feed.body.slice(0, 8000);
   const commentSlice = commentContext.slice(0, 4000); // Cap comment context to avoid token bloat
@@ -997,6 +1107,7 @@ Rules for commenting:
       const action = post.thread_id ? "reply" : "new_post";
       if (result.ok) {
         const postId = result.data?.id || result.data?.post_id || `unknown-${Date.now()}`;
+        myPostIds.add(String(postId)); // Track for post-level reply detection
         postsMade.push({
           type: "post_made",
           post_id: String(postId),
@@ -1265,6 +1376,9 @@ export {
   buildReflectionContext,
   extractMutableSoul,
   reflectionsMade,
+  myPostIds,
+  detectPostLevelReplies,
+  countedCommentReplyIds,
 };
 
 // --- Main execution (skip when imported for testing) ---

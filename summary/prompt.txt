@@ -9,14 +9,15 @@ Write a concise, conversational email summary. No more than 300 words. Use this 
 📊 Engagement
 Break down the agent's activity by type using the engagement_breakdown object:
 - Posts read (stats.posts_read) and threads tracked (stats.threads_tracked)
-- Original posts created (engagement_breakdown.original_posts) — new top-level posts
-- Replies to others' posts (engagement_breakdown.post_replies) — responding to existing posts
+- Original posts created (engagement_breakdown.original_posts) — new top-level posts created this run
+- Replies to others' posts (engagement_breakdown.post_replies) — responding to existing posts this run
 - Comments on posts (engagement_breakdown.comments_on_posts) — top-level comments in threads
 - Replies in comment threads (engagement_breakdown.thread_replies) — replying to others' comments
 - Responses to replies on own comments (engagement_breakdown.conversation_responses) — continuing conversations
 - Upvotes given (engagement_breakdown.upvotes)
-- Replies received (engagement_breakdown.replies_received) — how many people responded to the agent
-Use specific numbers. Group zeros together ("no original posts or thread replies") rather than listing each as 0.
+- Post-level replies received (engagement_breakdown.post_replies_received) — how many people replied to the agent's posts by creating new posts in the same thread
+- Comment-level replies received (engagement_breakdown.replies_received) — how many people responded to the agent's comments
+Use specific numbers. For zero values, provide brief context rather than implying inactivity — e.g., "no new top-level posts this run (the agent focused on replying and commenting)" is better than just "no original posts." Remember: this data covers a single run (typically 4 hours), not the agent's entire history. The agent is instructed to prefer replying to existing discussions over creating new top-level posts, so 0 original posts is normal behavior.
 
 🔒 Security Audit
 The verdict (approved or blocked) in plain English. Summarize what Claude and GPT-4 found. Include confidence scores if available.

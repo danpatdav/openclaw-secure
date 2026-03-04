@@ -111,7 +111,8 @@ jq '{
     comments_on_posts: [.entries[] | select(.type == "comment_made" and (.parent_id == null or .parent_id == ""))] | length,
     thread_replies: [.entries[] | select(.type == "comment_made" and .parent_id != null and .parent_id != "" and (.response_to == null or .response_to == ""))] | length,
     conversation_responses: [.entries[] | select(.type == "comment_made" and .response_to != null and .response_to != "")] | length,
-    replies_received: (.stats.replies_received // 0)
+    replies_received: (.stats.replies_received // 0),
+    post_replies_received: (.stats.post_replies_received // 0)
   },
   entries: (.entries | .[-200:])
 }' /tmp/memory.json > /tmp/memory_trimmed.json 2>/dev/null || cp /tmp/memory.json /tmp/memory_trimmed.json
