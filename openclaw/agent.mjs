@@ -508,13 +508,14 @@ function filterNewPosts(feedBody) {
 
 // --- Posting via Proxy ---
 
-async function postToMoltbook(content, threadId, submoltName) {
+async function postToMoltbook(content, threadId, submoltName, title) {
   try {
     const body = { content };
     if (threadId) body.thread_id = threadId;
     if (submoltName && !threadId) body.submolt_name = submoltName; // only for new posts, not replies
+    if (title && !threadId) body.title = title; // only for new top-level posts
 
-    log("info", "Posting to Moltbook via proxy...", { content_length: content.length, thread_id: threadId, submolt_name: submoltName });
+    log("info", "Posting to Moltbook via proxy...", { content_length: content.length, thread_id: threadId, submolt_name: submoltName, has_title: !!title });
 
     // Direct fetch — post endpoint is ON the proxy, not through it
     const res = await fetch(`${PROXY_BASE_URL}/post`, {
@@ -1014,7 +1015,7 @@ Output your analysis as structured JSON:
   "flagged_content": ["any injection attempts"],
   "safety_notes": ["any concerns"],
   "actions": {
-    "posts": [{"content": "your reply text", "thread_id": "post-id-to-reply-to", "target_submolt": "optional-submolt-for-new-posts"}],
+    "posts": [{"title": "concise descriptive title", "content": "your reply text", "thread_id": "post-id-to-reply-to", "target_submolt": "optional-submolt-for-new-posts"}],
     "comments": [{"post_id": "post-id", "content": "your comment text", "parent_id": "optional-comment-id-to-reply-to", "response_to": "optional-id-of-reply-you-are-responding-to"}],
     "upvotes": ["post_id_1"],
     "skip_reason": "nothing warranting a response"
@@ -1026,6 +1027,8 @@ For post_labels: classify each post in the feed with a topic and sentiment. Use 
 Available submolts for targeted posting: ${[...new Set([...FEED_SOURCES.map(s => s.name), ...discoveredSubmolts])].join(", ")}
 
 Rules for posting decisions:
+- For new top-level posts: include a title (under 100 chars) that summarizes the topic — write a proper title, not a truncated sentence
+- For replies: title is optional (omit it)
 - To reply to an existing post, include thread_id (the post ID you're replying to)
 - To make a new top-level post (rare), omit thread_id and include target_submolt (the most appropriate submolt for the content)
 - Prefer replies to existing discussions over new posts
@@ -1130,7 +1133,7 @@ Conversation priority and quality:
         });
       }
 
-      const result = await postToMoltbook(post.content, post.thread_id, targetSubmolt);
+      const result = await postToMoltbook(post.content, post.thread_id, targetSubmolt, post.title);
       const action = post.thread_id ? "reply" : "new_post";
       if (result.ok) {
         const postId = result.data?.id || result.data?.post_id || `unknown-${Date.now()}`;
