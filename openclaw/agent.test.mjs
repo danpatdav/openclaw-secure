@@ -437,6 +437,51 @@ describe("detectReplies", () => {
     const result = detectReplies(comments, ownIds, new Set());
     expect(result[0].isReply).toBe(true);
   });
+
+  it("marks comments on authored posts as isCommentOnOwnPost", () => {
+    const ownIds = new Map(); // no comments by us
+    const comments = [
+      { id: "c1", author: "alice", content: "Nice post!" },
+      { id: "c2", author: "bob", content: "I agree" },
+    ];
+    const result = detectReplies(comments, ownIds, new Set(), true);
+    expect(result[0].isCommentOnOwnPost).toBe(true);
+    expect(result[1].isCommentOnOwnPost).toBe(true);
+    expect(result[0].isReply).toBe(false);
+  });
+
+  it("does not mark own comments as isCommentOnOwnPost", () => {
+    const ownIds = new Map([["c1", "post-1"]]);
+    const comments = [
+      { id: "c1", author: "danielsclaw", content: "My own comment" },
+      { id: "c2", author: "alice", content: "Reply to the post" },
+    ];
+    const result = detectReplies(comments, ownIds, new Set(), true);
+    // c1 is our own comment — should NOT be flagged as comment on own post
+    expect(result[0].isCommentOnOwnPost).toBe(false);
+    // c2 is from someone else on our post
+    expect(result[1].isCommentOnOwnPost).toBe(true);
+  });
+
+  it("does not set isCommentOnOwnPost when isAuthoredPost is false", () => {
+    const ownIds = new Map();
+    const comments = [
+      { id: "c1", author: "alice", content: "Comment on someone else's post" },
+    ];
+    const result = detectReplies(comments, ownIds, new Set(), false);
+    expect(result[0].isCommentOnOwnPost).toBe(false);
+  });
+
+  it("prioritizes isReply over isCommentOnOwnPost", () => {
+    const ownIds = new Map([["c1", "post-1"]]);
+    const comments = [
+      { id: "r1", author: "alice", content: "Replying to your comment", parent_id: "c1" },
+    ];
+    const result = detectReplies(comments, ownIds, new Set(), true);
+    // This is a direct reply to our comment — isReply takes priority
+    expect(result[0].isReply).toBe(true);
+    expect(result[0].isCommentOnOwnPost).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -480,6 +525,41 @@ describe("buildMemoryPayload replies tracking", () => {
     const comment = payload.entries.find(e => e.type === "comment_made");
     expect(comment).toBeDefined();
     expect(comment.response_to).toBeUndefined();
+  });
+
+  it("carries forward historical comments and posts in payload", () => {
+    // Simulate entries loaded from previous run via loadMemory
+    commentsMade.push({
+      type: "comment_made",
+      post_id: "post-old",
+      comment_id: "c-old",
+      timestamp: "2026-03-01T00:00:00Z",
+      content: "Historical comment from prior run",
+    });
+    postsMade.push({
+      type: "post_made",
+      post_id: "post-old-reply",
+      thread_id: "thread-1",
+      content: "Historical reply from prior run",
+      timestamp: "2026-03-01T00:00:00Z",
+      action: "reply",
+      status: "success",
+    });
+    // Add a current-run comment
+    commentsMade.push({
+      type: "comment_made",
+      post_id: "post-new",
+      comment_id: "c-new",
+      timestamp: "2026-03-04T10:00:00Z",
+      content: "Current run comment",
+    });
+    const payload = buildMemoryPayload();
+    const comments = payload.entries.filter(e => e.type === "comment_made");
+    const posts = payload.entries.filter(e => e.type === "post_made");
+    expect(comments.length).toBe(2); // historical + current
+    expect(posts.length).toBe(1); // historical reply
+    expect(payload.stats.comments).toBe(2);
+    expect(payload.stats.posts_made).toBe(1);
   });
 });
 

@@ -134,7 +134,7 @@ async function loadMemory() {
       log("info", "No approved memory available — starting fresh");
       return;
     }
-    // Load seen post IDs for dedup, and track own commented posts
+    // Load seen post IDs for dedup, track own commented posts, and carry forward entries
     for (const entry of result.data.entries) {
       if (entry.type === "post_seen") {
         seenPostIds.add(entry.post_id);
@@ -152,12 +152,16 @@ async function loadMemory() {
         if (entry.response_to) {
           respondedReplyIds.add(entry.response_to);
         }
-      } else if (entry.type === "post_made" && entry.action === "comment") {
-        // Backward compat: older entries stored comments as post_made with action: "comment"
-        myCommentedPosts.add(entry.post_id);
+        // Carry forward full comment entry so it survives across runs
+        commentsMade.push(entry);
+      } else if (entry.type === "post_made" && entry.action === "upvote") {
+        // Upvotes: track dedup only, don't carry forward full entries (high volume, low value)
+        if (entry.post_id) myPostIds.add(entry.post_id);
       } else if (entry.type === "post_made" && entry.post_id && entry.post_id !== "none") {
         // Track agent's own post IDs for detecting post-level replies in the feed
         myPostIds.add(entry.post_id);
+        // Carry forward non-upvote post entries (new_post, reply) so content survives across runs
+        postsMade.push(entry);
       } else if (entry.type === "reflection_made") {
         reflectionsMade.push(entry);
         // Track most recent reflection timestamp for weekly cadence
@@ -244,7 +248,7 @@ function buildMemoryPayload() {
       posts_read: postsReadCount,
       posts_made: postsMade.length,
       upvotes: upvotesCount,
-      comments: commentsCount,
+      comments: commentsMade.length,
       replies_received: repliesReceivedCount,
       post_replies_received: postRepliesReceivedCount,
       threads_tracked: trackedThreads.size,
@@ -596,12 +600,19 @@ async function commentOnPost(postId, content, parentId) {
  * Pure function — takes comments array and a Map of our comment_id → post_id.
  * Returns array of { comment, isReply, isResponded } objects.
  */
-function detectReplies(comments, ownCommentIds, respondedIds) {
-  return comments.map(c => ({
-    comment: c,
-    isReply: !!(c.parent_id && ownCommentIds.has(String(c.parent_id))),
-    isResponded: !!(c.id && respondedIds.has(String(c.id))),
-  }));
+function detectReplies(comments, ownCommentIds, respondedIds, isAuthoredPost = false) {
+  return comments.map(c => {
+    const isReply = !!(c.parent_id && ownCommentIds.has(String(c.parent_id)));
+    // On posts the agent authored, any comment not by us is a reply to our post
+    const isOwnComment = !!(c.id && ownCommentIds.has(String(c.id)));
+    const isCommentOnOwnPost = isAuthoredPost && !isOwnComment && !isReply;
+    return {
+      comment: c,
+      isReply,
+      isCommentOnOwnPost,
+      isResponded: !!(c.id && respondedIds.has(String(c.id))),
+    };
+  });
 }
 
 // --- Quiet Reflection ---
@@ -893,17 +904,28 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
     return;
   }
 
-  // Fetch comments for posts we've previously commented on (check for replies)
+  // Fetch comments for posts we've engaged with OR authored (check for replies)
   let commentContext = "";
-  if (myCommentedPosts.size > 0) {
-    const postsToCheck = Array.from(myCommentedPosts).slice(0, 5); // Check up to 5 prior posts
-    log("info", "Checking for replies on previously commented posts", { count: postsToCheck.length });
+  // Combine posts we commented on + posts we authored (myPostIds) for reply checking
+  const postsToCheckForReplies = new Set([...myCommentedPosts, ...myPostIds]);
+  if (postsToCheckForReplies.size > 0) {
+    const postsToCheck = Array.from(postsToCheckForReplies).slice(0, 8); // Check up to 8 prior posts
+    log("info", "Checking for replies on engaged/authored posts", {
+      count: postsToCheck.length,
+      from_comments: myCommentedPosts.size,
+      from_authored: myPostIds.size,
+    });
 
     const commentResults = [];
     for (const postId of postsToCheck) {
       const result = await fetchPostComments(postId);
       if (result.ok && result.comment_count > 0) {
-        commentResults.push({ post_id: postId, comments: result.comments, count: result.comment_count });
+        commentResults.push({
+          post_id: postId,
+          comments: result.comments,
+          count: result.comment_count,
+          is_authored: myPostIds.has(postId),
+        });
       }
     }
 
@@ -911,26 +933,31 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
       commentContext = "\n\n--- EXISTING COMMENTS ON POSTS YOU'VE ENGAGED WITH ---\n";
       let unrespondedCount = 0;
       for (const r of commentResults) {
-        const annotated = detectReplies(r.comments, myCommentIds, respondedReplyIds);
+        const annotated = detectReplies(r.comments, myCommentIds, respondedReplyIds, r.is_authored);
         commentContext += `\nPost ${r.post_id} (${r.count} comments):\n`;
-        for (const { comment: c, isReply, isResponded } of annotated.slice(0, 10)) {
+        for (const { comment: c, isReply, isResponded, isCommentOnOwnPost } of annotated.slice(0, 10)) {
           const sanitizedTag = c.sanitized ? " [SANITIZED]" : "";
-          const replyTag = isReply ? (isResponded ? " [REPLY TO YOU - ALREADY RESPONDED]" : " [REPLY TO YOU - NEW]") : "";
-          if (isReply && !isResponded) unrespondedCount++;
+          let replyTag = "";
+          if (isReply) {
+            replyTag = isResponded ? " [REPLY TO YOU - ALREADY RESPONDED]" : " [REPLY TO YOU - NEW]";
+          } else if (isCommentOnOwnPost) {
+            replyTag = isResponded ? " [COMMENT ON YOUR POST - ALREADY RESPONDED]" : " [COMMENT ON YOUR POST - NEW]";
+          }
+          if ((isReply || isCommentOnOwnPost) && !isResponded) unrespondedCount++;
           commentContext += `  - ${c.author}${replyTag}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
         }
         // Track replies for stats (dedup across cycles to avoid double-counting)
-        for (const { comment: c, isReply } of annotated) {
-          if (isReply && c.id && !countedCommentReplyIds.has(String(c.id))) {
+        for (const { comment: c, isReply, isCommentOnOwnPost } of annotated) {
+          if ((isReply || isCommentOnOwnPost) && c.id && !countedCommentReplyIds.has(String(c.id))) {
             countedCommentReplyIds.add(String(c.id));
             repliesReceivedCount++;
           }
         }
       }
       if (unrespondedCount > 0) {
-        commentContext += `\nYou have ${unrespondedCount} new reply/replies to your comments. Consider responding to continue the conversation.\n`;
+        commentContext += `\nYou have ${unrespondedCount} new reply/replies to respond to. Consider continuing the conversation.\n`;
       } else {
-        commentContext += "\nNo new replies to your comments.\n";
+        commentContext += "\nNo new replies to your comments or posts.\n";
       }
     }
   }
@@ -1219,24 +1246,9 @@ Conversation priority and quality:
         }
       } else if (result.status === 429) {
         commentRateLimited = true;
-        // Still record the attempt as post_made for backward compat audit trail
-        postsMade.push({
-          type: "post_made",
-          post_id: String(comment.post_id),
-          thread_id: comment.parent_id || comment.post_id,
-          timestamp: new Date().toISOString(),
-          action: "comment",
-          status: "rate_limited",
-        });
+        log("info", "Comment rate limited", { post_id: comment.post_id });
       } else {
-        postsMade.push({
-          type: "post_made",
-          post_id: String(comment.post_id),
-          thread_id: comment.parent_id || comment.post_id,
-          timestamp: new Date().toISOString(),
-          action: "comment",
-          status: "error",
-        });
+        log("warn", "Comment submission failed", { post_id: comment.post_id, status: result.status });
       }
     }
 
