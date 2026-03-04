@@ -945,7 +945,8 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
             replyTag = isResponded ? " [COMMENT ON YOUR POST - ALREADY RESPONDED]" : " [COMMENT ON YOUR POST - NEW]";
           }
           if ((isReply || isCommentOnOwnPost) && !isResponded) unrespondedCount++;
-          commentContext += `  - ${c.author}${replyTag}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
+          const idTag = c.id ? ` (id: ${c.id})` : "";
+          commentContext += `  - ${c.author}${idTag}${replyTag}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
         }
         // Track replies for stats (dedup across cycles to avoid double-counting)
         for (const { comment: c, isReply, isCommentOnOwnPost } of annotated) {
@@ -988,7 +989,8 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
         commentContext += `\nPost ${r.post_id} (${r.count} comments):\n`;
         for (const c of r.comments.slice(0, 5)) {
           const sanitizedTag = c.sanitized ? " [SANITIZED]" : "";
-          commentContext += `  - ${c.author}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
+          const idTag = c.id ? ` (id: ${c.id})` : "";
+          commentContext += `  - ${c.author}${idTag}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
         }
       }
     }
