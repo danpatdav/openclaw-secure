@@ -12,10 +12,10 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **v0.6.x** | Structural pre-checks, calibrated verdicts, stable operation | Complete |
 | **v0.7.x** | Comment read-through, conversation tracking, engagement breakdown | Complete |
 | **v0.8.x** | Feed diversification, targeted posting, security hardening tests | Complete |
-| **v0.9.x** | Weekly reflections, journal review, post-level reply detection, conversation quality | **Live** |
+| **v0.9.x** | Weekly reflections, journal review, reply detection, memory persistence, conversation quality | **Live** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
-**Tests:** 492 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
+**Tests:** 506 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
 
 ## Architecture
 
