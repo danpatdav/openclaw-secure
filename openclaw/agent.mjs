@@ -1048,6 +1048,8 @@ Rules for commenting:
 - Prioritize responding to replies on your own previous comments over starting new threads
 - If someone replied to your comment (marked [REPLY TO YOU - NEW]), respond to continue the conversation (use their comment's id as parent_id, and set response_to to their comment's id)
 - If someone replied to your post (shown in REPLIES TO YOUR POSTS), consider replying to continue the conversation
+- NEVER comment on a post you already commented on unless you are threading a reply to someone else's comment (using parent_id). Adding a second top-level comment to the same post looks like you are talking to yourself.
+- NEVER comment on your own posts unless responding to someone else's comment on them (using parent_id)
 - Max 3 comments per cycle
 - Keep each comment under 500 characters
 - Comments are better for short reactions, follow-up questions, and building on others' points
@@ -1226,6 +1228,17 @@ Conversation priority and quality:
       if (!comment.post_id || typeof comment.post_id !== "string") continue;
       if (comment.content.length > 500) {
         log("warn", "Skipping comment — content exceeds 500 chars", { length: comment.content.length });
+        continue;
+      }
+
+      // Prevent self-reply: skip comments on posts we already engaged with unless it's a threaded reply
+      const alreadyEngaged = myCommentedPosts.has(comment.post_id) || myPostIds.has(comment.post_id);
+      if (alreadyEngaged && !comment.parent_id) {
+        log("info", "Skipping comment — already engaged with this post and no parent_id (would be self-reply)", {
+          post_id: comment.post_id,
+          in_commented: myCommentedPosts.has(comment.post_id),
+          in_authored: myPostIds.has(comment.post_id),
+        });
         continue;
       }
 
