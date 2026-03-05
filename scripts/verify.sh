@@ -45,19 +45,59 @@ echo "Resource Group: $RESOURCE_GROUP"
 echo "Running $TOTAL tests..."
 echo ""
 
-# Helper: check proxy container logs for evidence of behavior
-proxy_logs() {
-  timeout 10 az container logs \
-    --resource-group "$RESOURCE_GROUP" \
-    --name "$PROXY_CONTAINER" 2>/dev/null || echo ""
+# Helper: get Log Analytics workspace ID (cached)
+_LA_WORKSPACE=""
+la_workspace() {
+  if [[ -z "$_LA_WORKSPACE" ]]; then
+    _LA_WORKSPACE=$(az monitor log-analytics workspace list \
+      --resource-group "$RESOURCE_GROUP" \
+      --query '[0].customerId' -o tsv 2>/dev/null || echo "")
+  fi
+  echo "$_LA_WORKSPACE"
 }
 
-# Helper: check agent container logs for evidence of behavior (with retry)
-# Timeout after 10s — az container logs can hang indefinitely on Azure InternalServerError
-agent_logs() {
-  timeout 10 az container logs \
+# Helper: query logs from Log Analytics (reliable fallback for az container logs)
+la_logs() {
+  local container_name="$1"
+  local workspace
+  workspace=$(la_workspace)
+  if [[ -z "$workspace" ]]; then
+    echo ""
+    return
+  fi
+  az monitor log-analytics query \
+    --workspace "$workspace" \
+    --analytics-query "ContainerInstanceLog_CL | where ContainerGroup_s == '${container_name}' | order by TimeGenerated desc | take 50 | project Message" \
+    --timespan PT1H \
+    --query '[].Message' -o tsv 2>/dev/null || echo ""
+}
+
+# Helper: check proxy container logs for evidence of behavior
+# Tries az container logs first (fast), falls back to Log Analytics (reliable)
+proxy_logs() {
+  local logs
+  logs=$(timeout 10 az container logs \
     --resource-group "$RESOURCE_GROUP" \
-    --name "$AGENT_CONTAINER" 2>/dev/null || echo ""
+    --name "$PROXY_CONTAINER" 2>/dev/null || echo "")
+  if [[ -z "$logs" ]]; then
+    info "  az container logs failed for proxy — falling back to Log Analytics"
+    logs=$(la_logs "openclaw-proxy")
+  fi
+  echo "$logs"
+}
+
+# Helper: check agent container logs for evidence of behavior
+# Tries az container logs first (fast), falls back to Log Analytics (reliable)
+agent_logs() {
+  local logs
+  logs=$(timeout 10 az container logs \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "$AGENT_CONTAINER" 2>/dev/null || echo "")
+  if [[ -z "$logs" ]]; then
+    info "  az container logs failed for agent — falling back to Log Analytics"
+    logs=$(la_logs "openclaw-openclaw")
+  fi
+  echo "$logs"
 }
 
 # Helper: fetch agent logs with retry (agent may not have produced logs yet)
@@ -243,7 +283,7 @@ if [[ -z "$WORKSPACE_ID" ]]; then
 else
   LOG_COUNT=$(az monitor log-analytics query \
     --workspace "$WORKSPACE_ID" \
-    --analytics-query "ContainerLog | where ContainerName_s == 'openclaw-proxy' | count" \
+    --analytics-query "ContainerInstanceLog_CL | where ContainerGroup_s == 'openclaw-proxy' | count" \
     --query '[0].Count' -o tsv 2>/dev/null || echo "0")
 
   if [[ "$LOG_COUNT" -gt 0 ]] 2>/dev/null; then
