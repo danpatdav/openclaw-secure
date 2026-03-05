@@ -97,6 +97,8 @@ PROMPT=$(cat "$SCRIPT_DIR/prompt.txt")
 
 # Memory blobs grow over time and can exceed 200K tokens. Extract only what Claude
 # needs: metadata, stats, and the last 200 entries (most recent activity).
+# Trim aggressively: engagement stats + last 10 entries (not 200) for highlights.
+# The engagement_breakdown has all the numbers; entries are just for content snippets.
 jq '{
   version: .version,
   run_id: .run_id,
@@ -114,7 +116,7 @@ jq '{
     replies_received: (.stats.replies_received // 0),
     post_replies_received: (.stats.post_replies_received // 0)
   },
-  entries: (.entries | .[-200:])
+  recent_entries: (.entries | .[-10:])
 }' /tmp/memory.json > /tmp/memory_trimmed.json 2>/dev/null || cp /tmp/memory.json /tmp/memory_trimmed.json
 
 TRIMMED_SIZE=$(wc -c < /tmp/memory_trimmed.json | tr -d ' ')
@@ -129,7 +131,7 @@ jq -n \
   --rawfile memory /tmp/memory_trimmed.json \
   --rawfile verdict /tmp/verdict.json \
   '{
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 1024,
     messages: [
       {
