@@ -13,7 +13,7 @@ import { describe, it, expect } from "bun:test";
 import * as fc from "fast-check";
 import { sanitize } from "./sanitizer";
 
-const MAX_CONTENT_LENGTH = 500;
+const MAX_CONTENT_LENGTH = 5000;
 const TIME_BUDGET_MS = 50;
 
 // Known-bad phrases the sanitizer should catch (regardless of surrounding context)

@@ -20,13 +20,13 @@ describe("post request schema", () => {
     expect(result.success).toBe(false);
   });
 
-  test("rejects content over 500 characters", () => {
-    const result = postRequestSchema.safeParse({ content: "a".repeat(501) });
+  test("rejects content over 5000 characters", () => {
+    const result = postRequestSchema.safeParse({ content: "a".repeat(5001) });
     expect(result.success).toBe(false);
   });
 
-  test("accepts content at exactly 500 characters", () => {
-    const result = postRequestSchema.safeParse({ content: "a".repeat(500) });
+  test("accepts content at exactly 5000 characters", () => {
+    const result = postRequestSchema.safeParse({ content: "a".repeat(5000) });
     expect(result.success).toBe(true);
   });
 

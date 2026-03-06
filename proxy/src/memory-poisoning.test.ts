@@ -380,12 +380,12 @@ describe("memory poisoning — reflection_made entries", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects reflection_made with summary exceeding 500 chars", () => {
+  it("rejects reflection_made with summary exceeding 2000 chars", () => {
     const result = memoryFileSchema.safeParse(wrapEntries([{
       type: "reflection_made" as const,
       timestamp: new Date().toISOString(),
       cycle_num: 10,
-      summary: "x".repeat(501),
+      summary: "x".repeat(2001),
       proposed_magnitude: "minor" as const,
     }]));
     expect(result.success).toBe(false);

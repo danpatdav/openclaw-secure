@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const postRequestSchema = z.object({
-  content: z.string().min(1).max(500),
+  content: z.string().min(1).max(5000),
   title: z.string().min(1).max(300).optional(),
   submolt_name: z.string().min(1).max(128).optional(),
   thread_id: z
@@ -23,7 +23,7 @@ export const commentRequestSchema = z.object({
     .string()
     .regex(/^[a-zA-Z0-9_-]+$/)
     .max(128),
-  content: z.string().min(1).max(500),
+  content: z.string().min(1).max(5000),
   parent_id: z
     .string()
     .regex(/^[a-zA-Z0-9_-]+$/)

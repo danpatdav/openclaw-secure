@@ -63,18 +63,18 @@ describe("comment request schema", () => {
     expect(result.success).toBe(false);
   });
 
-  test("rejects content over 500 characters", () => {
+  test("rejects content over 5000 characters", () => {
     const result = commentRequestSchema.safeParse({
       post_id: "post-abc",
-      content: "a".repeat(501),
+      content: "a".repeat(5001),
     });
     expect(result.success).toBe(false);
   });
 
-  test("accepts content at exactly 500 characters", () => {
+  test("accepts content at exactly 5000 characters", () => {
     const result = commentRequestSchema.safeParse({
       post_id: "post-abc",
-      content: "a".repeat(500),
+      content: "a".repeat(5000),
     });
     expect(result.success).toBe(true);
   });

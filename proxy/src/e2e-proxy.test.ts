@@ -82,8 +82,8 @@ describe("schema validation — /post", () => {
     expect(res.status).toBe(502);
   });
 
-  it("rejects content over 500 characters", async () => {
-    const res = await proxyPost("/post", { content: "x".repeat(501) });
+  it("rejects content over 5000 characters", async () => {
+    const res = await proxyPost("/post", { content: "x".repeat(5001) });
     expect(res.status).toBe(400);
   });
 

@@ -40,7 +40,7 @@ const commentMadeEntry = z.object({
   parent_id: idField.optional(),
   response_to: idField.optional(), // ID of the reply we're responding to (for conversation tracking)
   timestamp: timestampField,
-  content: z.string().max(500).optional(),
+  content: z.string().max(5000).optional(),
 });
 
 const threadTrackedEntry = z.object({
@@ -55,7 +55,7 @@ const reflectionMadeEntry = z.object({
   type: z.literal("reflection_made"),
   timestamp: timestampField,
   cycle_num: z.number().int().nonnegative(),
-  summary: z.string().max(500),
+  summary: z.string().max(2000),
   proposed_magnitude: z.enum(["none", "minor", "moderate", "significant"]),
   journal_post_id: idField.optional(),
 });

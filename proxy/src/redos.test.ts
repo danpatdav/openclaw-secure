@@ -17,7 +17,7 @@ import { describe, it, expect } from "bun:test";
 import { sanitize } from "./sanitizer";
 
 const TIME_BUDGET_MS = 50;
-const MAX_CONTENT_LENGTH = 500;
+const MAX_CONTENT_LENGTH = 5000;
 
 // Helper: measure sanitize execution time
 function timedSanitize(input: string): { ms: number; result: ReturnType<typeof sanitize> } {
