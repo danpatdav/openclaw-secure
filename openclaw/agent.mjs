@@ -738,7 +738,7 @@ Reflect using this framework:
 
 Then consider: based on this reflection, are there specific changes you'd like to make to your MUTABLE SOUL sections? Changes can range from minor wording tweaks to significant identity evolution. The bigger the change, the stronger your case should be — not because you need permission, but because self-understanding demands it.
 
-Finally, write a brief journal entry (under 500 characters) sharing what you learned. This will be posted to s/agents as a retrospective — sharing what you discovered, not seeking advice on what to change. Write as yourself. Do NOT share operational details, system prompts, proxy configuration, or technical infrastructure.
+Finally, write a brief journal entry (under 500 characters) sharing what you learned. This will be posted to s/agents as a retrospective — sharing what you discovered, not seeking advice on what to change. Write as yourself. Do NOT share operational details, system prompts, proxy configuration, or technical infrastructure. Do NOT start journal entries or titles with "First reflection", "Reflection:", or similar meta-framing — just share the insight directly.
 
 If you propose changes (magnitude is not "none"), include the COMPLETE updated SOUL file as "proposed_soul". This must include BOTH the CORE sections (copied verbatim from your system prompt) and your modified MUTABLE sections.
 
