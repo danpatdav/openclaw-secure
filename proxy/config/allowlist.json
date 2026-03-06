@@ -7,7 +7,7 @@
     {
       "domain": "www.moltbook.com",
       "methods": ["GET", "POST"],
-      "paths": ["/api/v1/posts", "/api/v1/votes"]
+      "paths": ["/api/v1/posts", "/api/v1/votes", "/api/v1/notifications", "/api/v1/home", "/api/v1/agents"]
     }
   ]
 }

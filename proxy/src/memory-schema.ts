@@ -74,6 +74,8 @@ const statsSchema = z.object({
   upvotes: z.number().int().nonnegative(),
   comments: z.number().int().nonnegative().default(0),
   replies_received: z.number().int().nonnegative().default(0),
+  post_replies_received: z.number().int().nonnegative().default(0),
+  notifications_processed: z.number().int().nonnegative().default(0),
   threads_tracked: z.number().int().nonnegative(),
   reflections: z.number().int().nonnegative().default(0),
 });

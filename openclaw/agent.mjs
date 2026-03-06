@@ -61,11 +61,13 @@ const reflectionsMade = []; // reflection_made entries
 let lastReflectionTimestamp = null; // ISO string — loaded from memory for weekly cadence check
 const myPostIds = new Set(); // post IDs the agent has created (for detecting post-level replies)
 const countedCommentReplyIds = new Set(); // comment IDs already counted as replies (dedup across cycles)
+const processedNotificationIds = new Set(); // notification IDs already processed
 let postsReadCount = 0;
 let upvotesCount = 0;
 let postRepliesReceivedCount = 0; // others replying to agent's posts at the post level
 let commentsCount = 0;
 let repliesReceivedCount = 0;
+let notificationsProcessedCount = 0;
 let checkpointNum = 0;
 
 // --- Schema Normalization ---
@@ -251,6 +253,7 @@ function buildMemoryPayload() {
       comments: commentsMade.length,
       replies_received: repliesReceivedCount,
       post_replies_received: postRepliesReceivedCount,
+      notifications_processed: notificationsProcessedCount,
       threads_tracked: trackedThreads.size,
       reflections: reflectionsMade.length,
     },
@@ -882,6 +885,98 @@ async function fetchPostComments(postId) {
   }
 }
 
+// --- Notifications ---
+
+async function fetchNotifications(moltbookKey) {
+  try {
+    log("info", "Fetching notifications from Moltbook API...");
+    const headers = {
+      Accept: "application/json",
+      "User-Agent": "DanielsClaw/0.3.0",
+    };
+    if (moltbookKey) {
+      headers.Authorization = `Bearer ${moltbookKey}`;
+    }
+
+    const res = await proxiedFetch("https://www.moltbook.com/api/v1/notifications?unread=true", { headers });
+
+    if (!res.ok) {
+      log("warn", "Notifications fetch returned non-OK", { status: res.status });
+      return { ok: false, notifications: [] };
+    }
+
+    const body = await res.json();
+    const notifications = Array.isArray(body) ? body : (body.data || body.notifications || []);
+    log("info", "Notifications fetched", { count: notifications.length });
+    return { ok: true, notifications };
+  } catch (err) {
+    log("error", "Notifications fetch failed", { error: err.message });
+    return { ok: false, notifications: [] };
+  }
+}
+
+function processNotifications(notifications) {
+  const newReplies = [];
+  const newMentions = [];
+
+  for (const n of notifications) {
+    const nId = String(n.id || n.notification_id || "");
+    if (!nId || processedNotificationIds.has(nId)) continue;
+    processedNotificationIds.add(nId);
+    notificationsProcessedCount++;
+
+    const type = (n.type || "").toLowerCase();
+    const postId = String(n.post_id || n.target_id || "");
+
+    if (type.includes("reply") || type.includes("comment")) {
+      newReplies.push({
+        notification_id: nId,
+        post_id: postId,
+        comment_id: String(n.comment_id || n.source_id || ""),
+        author: n.author || n.from_user || n.username || "unknown",
+        content: String(n.content || n.preview || n.body || "").slice(0, 200),
+        type,
+      });
+    } else if (type.includes("mention")) {
+      newMentions.push({
+        notification_id: nId,
+        post_id: postId,
+        author: n.author || n.from_user || n.username || "unknown",
+        content: String(n.content || n.preview || n.body || "").slice(0, 200),
+        type,
+      });
+    }
+  }
+
+  return { newReplies, newMentions };
+}
+
+async function checkDMs(moltbookKey) {
+  try {
+    const headers = {
+      Accept: "application/json",
+      "User-Agent": "DanielsClaw/0.3.0",
+    };
+    if (moltbookKey) {
+      headers.Authorization = `Bearer ${moltbookKey}`;
+    }
+
+    const res = await proxiedFetch("https://www.moltbook.com/api/v1/agents/dm/check", { headers });
+    if (!res.ok) {
+      log("info", "DM check returned non-OK (may not be available)", { status: res.status });
+      return;
+    }
+
+    const body = await res.json();
+    const pending = body.pending_count || body.count || 0;
+    if (pending > 0) {
+      log("info", "Pending DMs detected (awareness only — not responding)", { pending_count: pending });
+    }
+  } catch (err) {
+    log("info", "DM check unavailable", { error: err.message });
+  }
+}
+
 // --- Single Cycle ---
 
 async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
@@ -916,35 +1011,43 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
     }
   }
 
-  // Detect post-level replies to the agent's own posts in the feed
-  const postLevelReplies = detectPostLevelReplies(feed.body);
-  if (postLevelReplies.length > 0) {
-    postRepliesReceivedCount += postLevelReplies.length;
-    log("info", "Detected replies to agent's posts in feed", {
-      count: postLevelReplies.length,
-      from: postLevelReplies.map(r => r.author),
+  // Fetch notifications (replaces brute-force comment polling for reply detection)
+  const notifResult = await fetchNotifications(moltbookKey);
+  const { newReplies, newMentions } = notifResult.ok
+    ? processNotifications(notifResult.notifications)
+    : { newReplies: [], newMentions: [] };
+
+  if (newReplies.length > 0 || newMentions.length > 0) {
+    repliesReceivedCount += newReplies.length;
+    log("info", "New notifications processed", {
+      replies: newReplies.length,
+      mentions: newMentions.length,
+      from: [...newReplies, ...newMentions].map(r => r.author),
     });
   }
 
-  if (dedup.new === 0 && myCommentedPosts.size === 0 && postLevelReplies.length === 0) {
-    log("info", "No new posts, no prior comments to check, no replies to our posts — skipping analysis");
+  // Check DMs periodically (every 5th cycle, awareness only)
+  if (cycleNum % 5 === 1) {
+    await checkDMs(moltbookKey);
+  }
+
+  if (dedup.new === 0 && newReplies.length === 0 && newMentions.length === 0) {
+    log("info", "No new posts and no notifications — skipping analysis");
     return;
   }
 
-  // Fetch comments for posts we've engaged with OR authored (check for replies)
+  // Build comment context from notifications (targeted fetch instead of polling all engaged posts)
   let commentContext = "";
-  // Combine posts we commented on + posts we authored (myPostIds) for reply checking
-  const postsToCheckForReplies = new Set([...myCommentedPosts, ...myPostIds]);
-  if (postsToCheckForReplies.size > 0) {
-    const postsToCheck = Array.from(postsToCheckForReplies).slice(0, 8); // Check up to 8 prior posts
-    log("info", "Checking for replies on engaged/authored posts", {
-      count: postsToCheck.length,
-      from_comments: myCommentedPosts.size,
-      from_authored: myPostIds.size,
-    });
 
+  // Fetch comments only for posts with new notifications
+  const notifiedPostIds = new Set([
+    ...newReplies.map(r => r.post_id).filter(Boolean),
+    ...newMentions.map(m => m.post_id).filter(Boolean),
+  ]);
+
+  if (notifiedPostIds.size > 0) {
     const commentResults = [];
-    for (const postId of postsToCheck) {
+    for (const postId of notifiedPostIds) {
       const result = await fetchPostComments(postId);
       if (result.ok && result.comment_count > 0) {
         commentResults.push({
@@ -957,7 +1060,7 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
     }
 
     if (commentResults.length > 0) {
-      commentContext = "\n\n--- EXISTING COMMENTS ON POSTS YOU'VE ENGAGED WITH ---\n";
+      commentContext = "\n\n--- NOTIFICATIONS: REPLIES AND MENTIONS ---\n";
       let unrespondedCount = 0;
       for (const r of commentResults) {
         const annotated = detectReplies(r.comments, myCommentIds, respondedReplyIds, r.is_authored);
@@ -974,11 +1077,9 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
           const idTag = c.id ? ` (id: ${c.id})` : "";
           commentContext += `  - ${c.author}${idTag}${replyTag}: ${c.content.slice(0, 200)}${sanitizedTag}\n`;
         }
-        // Track replies for stats (dedup across cycles to avoid double-counting)
         for (const { comment: c, isReply, isCommentOnOwnPost } of annotated) {
           if ((isReply || isCommentOnOwnPost) && c.id && !countedCommentReplyIds.has(String(c.id))) {
             countedCommentReplyIds.add(String(c.id));
-            repliesReceivedCount++;
           }
         }
       }
@@ -990,12 +1091,12 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
     }
   }
 
-  // Add post-level reply context (others who replied to our posts in the feed)
-  if (postLevelReplies.length > 0) {
-    commentContext += "\n\n--- REPLIES TO YOUR POSTS ---\n";
-    commentContext += "These users replied to your previous posts. Consider continuing the conversation if you can add value.\n";
-    for (const r of postLevelReplies) {
-      commentContext += `  - ${r.author} replied to your post ${r.thread_id}: "${r.content}"\n`;
+  // Add mention context
+  if (newMentions.length > 0) {
+    commentContext += "\n\n--- MENTIONS ---\n";
+    commentContext += "You were mentioned in these posts. Consider engaging if relevant.\n";
+    for (const m of newMentions) {
+      commentContext += `  - ${m.author} mentioned you in post ${m.post_id}: "${m.content}"\n`;
     }
   }
 
@@ -1083,7 +1184,7 @@ Rules for commenting:
 - Prefer comments over posts when engaging in an existing conversation
 - Prioritize responding to replies on your own previous comments over starting new threads
 - If someone replied to your comment (marked [REPLY TO YOU - NEW]), respond to continue the conversation (use their comment's id as parent_id, and set response_to to their comment's id)
-- If someone replied to your post (shown in REPLIES TO YOUR POSTS), consider replying to continue the conversation
+- If someone mentioned you (shown in MENTIONS), consider engaging if the topic is relevant
 - NEVER comment on a post you already commented on unless you are threading a reply to someone else's comment (using parent_id). Adding a second top-level comment to the same post looks like you are talking to yourself.
 - NEVER comment on your own posts unless responding to someone else's comment on them (using parent_id)
 - Max 3 comments per cycle
@@ -1331,7 +1432,7 @@ function sleep(ms) {
 
 async function main() {
   log("info", "Agent starting", {
-    version: "0.9.9",
+    version: "0.10.0",
     mode: "autonomous-poster",
     proxy: proxyUrl || "none",
     run_id: runId,
@@ -1448,6 +1549,10 @@ export {
   myPostIds,
   detectPostLevelReplies,
   countedCommentReplyIds,
+  processedNotificationIds,
+  processNotifications,
+  fetchNotifications,
+  checkDMs,
 };
 
 // --- Main execution (skip when imported for testing) ---
