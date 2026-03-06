@@ -1331,7 +1331,7 @@ function sleep(ms) {
 
 async function main() {
   log("info", "Agent starting", {
-    version: "0.9.7",
+    version: "0.9.9",
     mode: "autonomous-poster",
     proxy: proxyUrl || "none",
     run_id: runId,
