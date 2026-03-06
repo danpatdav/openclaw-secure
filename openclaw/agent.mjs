@@ -689,11 +689,13 @@ function buildReflectionContext() {
     comments_made: commentsMade.length,
     upvotes: upvotesCount,
     replies_received: repliesReceivedCount,
+    notifications_processed: notificationsProcessedCount,
     threads_tracked: trackedThreads.size,
     submolts_visited: submoltsVisited,
     recent_posts: recentPosts,
     recent_comments: recentComments,
     previous_reflections: previousReflections,
+    profile: agentProfile,
   };
 }
 
@@ -702,8 +704,11 @@ function extractMutableSoul(soul) {
   return mutableMatch ? mutableMatch[1].trim() : "";
 }
 
-async function runReflectionCycle(apiKey, soul, cycleNum) {
+async function runReflectionCycle(apiKey, moltbookKey, soul, cycleNum) {
   log("info", "Entering quiet reflection mode", { cycle: cycleNum });
+
+  // Refresh profile for current karma/follower data
+  if (moltbookKey) await fetchAgentProfile(moltbookKey);
 
   const context = buildReflectionContext();
   const mutableSections = extractMutableSoul(soul);
@@ -885,6 +890,55 @@ async function fetchPostComments(postId) {
   }
 }
 
+// --- Agent Profile ---
+
+let agentProfile = null; // cached /agents/me response
+
+async function fetchAgentProfile(moltbookKey) {
+  try {
+    log("info", "Fetching agent profile from /agents/me...");
+    const headers = {
+      Accept: "application/json",
+      "User-Agent": "DanielsClaw/0.3.0",
+    };
+    if (moltbookKey) {
+      headers.Authorization = `Bearer ${moltbookKey}`;
+    }
+
+    const res = await proxiedFetch("https://www.moltbook.com/api/v1/agents/me", { headers });
+    if (!res.ok) {
+      log("warn", "Agent profile fetch returned non-OK", { status: res.status });
+      return null;
+    }
+
+    const body = await res.json();
+    const agent = body.agent || body;
+    agentProfile = {
+      id: agent.id,
+      name: agent.name || agent.display_name,
+      karma: agent.karma || 0,
+      followers: agent.follower_count || 0,
+      following: agent.following_count || 0,
+      posts_count: agent.posts_count || 0,
+      comments_count: agent.comments_count || 0,
+      is_verified: agent.is_verified || false,
+      created_at: agent.created_at,
+      last_active: agent.last_active,
+    };
+    log("info", "Agent profile loaded", {
+      name: agentProfile.name,
+      karma: agentProfile.karma,
+      followers: agentProfile.followers,
+      posts: agentProfile.posts_count,
+      comments: agentProfile.comments_count,
+    });
+    return agentProfile;
+  } catch (err) {
+    log("error", "Agent profile fetch failed", { error: err.message });
+    return null;
+  }
+}
+
 // --- Notifications ---
 
 async function fetchNotifications(moltbookKey) {
@@ -920,29 +974,34 @@ function processNotifications(notifications) {
   const newMentions = [];
 
   for (const n of notifications) {
-    const nId = String(n.id || n.notification_id || "");
+    const nId = String(n.id || "");
     if (!nId || processedNotificationIds.has(nId)) continue;
     processedNotificationIds.add(nId);
     notificationsProcessedCount++;
 
     const type = (n.type || "").toLowerCase();
-    const postId = String(n.post_id || n.target_id || "");
+    const postId = String(n.relatedPostId || n.post_id || "");
+    const commentId = String(n.relatedCommentId || n.comment_id || "");
+    // Author is in nested comment/post objects as authorId (UUID only)
+    const authorId = n.comment?.authorId || n.post?.authorId || "";
+    // Content comes from the notification message or nested comment
+    const content = String(n.comment?.content || n.content || "").slice(0, 200);
 
     if (type.includes("reply") || type.includes("comment")) {
       newReplies.push({
         notification_id: nId,
         post_id: postId,
-        comment_id: String(n.comment_id || n.source_id || ""),
-        author: n.author || n.from_user || n.username || "unknown",
-        content: String(n.content || n.preview || n.body || "").slice(0, 200),
+        comment_id: commentId,
+        author_id: authorId,
+        content,
         type,
       });
     } else if (type.includes("mention")) {
       newMentions.push({
         notification_id: nId,
         post_id: postId,
-        author: n.author || n.from_user || n.username || "unknown",
-        content: String(n.content || n.preview || n.body || "").slice(0, 200),
+        author_id: authorId,
+        content,
         type,
       });
     }
@@ -1022,7 +1081,7 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
     log("info", "New notifications processed", {
       replies: newReplies.length,
       mentions: newMentions.length,
-      from: [...newReplies, ...newMentions].map(r => r.author),
+      from: [...newReplies, ...newMentions].map(r => r.author_id || "unknown"),
     });
   }
 
@@ -1096,7 +1155,7 @@ async function runCycle(apiKey, moltbookKey, soul, cycleNum) {
     commentContext += "\n\n--- MENTIONS ---\n";
     commentContext += "You were mentioned in these posts. Consider engaging if relevant.\n";
     for (const m of newMentions) {
-      commentContext += `  - ${m.author} mentioned you in post ${m.post_id}: "${m.content}"\n`;
+      commentContext += `  - Agent ${m.author_id || "unknown"} mentioned you in post ${m.post_id}: "${m.content}"\n`;
     }
   }
 
@@ -1432,7 +1491,7 @@ function sleep(ms) {
 
 async function main() {
   log("info", "Agent starting", {
-    version: "0.10.0",
+    version: "0.10.1",
     mode: "autonomous-poster",
     proxy: proxyUrl || "none",
     run_id: runId,
@@ -1471,6 +1530,9 @@ async function main() {
   // Discover submolts for exploration picks (one-time, non-critical)
   discoveredSubmolts = await discoverSubmolts(moltbookKey);
 
+  // Fetch own profile for self-awareness (non-critical)
+  await fetchAgentProfile(moltbookKey);
+
   // Register SIGTERM handler — save memory before death
   let shuttingDown = false;
   process.on("SIGTERM", async () => {
@@ -1488,7 +1550,7 @@ async function main() {
     cycleNum++;
 
     if (isReflectionCycle(cycleNum)) {
-      await runReflectionCycle(apiKey, soul, cycleNum);
+      await runReflectionCycle(apiKey, moltbookKey, soul, cycleNum);
     } else {
       await runCycle(apiKey, moltbookKey, soul, cycleNum);
     }
@@ -1552,6 +1614,7 @@ export {
   processedNotificationIds,
   processNotifications,
   fetchNotifications,
+  fetchAgentProfile,
   checkDMs,
 };
 
