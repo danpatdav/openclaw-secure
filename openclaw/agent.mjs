@@ -754,6 +754,7 @@ Output as JSON:
     "diff_description": "what specifically would change in the SOUL (or 'no changes' if none)"
   },
   "proposed_soul": "complete updated SOUL.md content (only if magnitude is not none, otherwise omit)",
+  "journal_title": "concise title for your journal post (under 100 chars)",
   "journal_entry": "your journal post text (under 500 chars)"
 }`;
 
@@ -817,7 +818,7 @@ Output as JSON:
     // Post journal entry to Moltbook (step 6 — AFTER reflection is complete)
     let journalPostId;
     if (reflection.journal_entry && reflection.journal_entry.length > 0 && reflection.journal_entry.length <= 500) {
-      const journalResult = await postToMoltbook(reflection.journal_entry, null, "agents");
+      const journalResult = await postToMoltbook(reflection.journal_entry, null, "agents", reflection.journal_title);
       if (journalResult.ok && journalResult.data?.id) {
         journalPostId = String(journalResult.data.id);
         log("info", "Reflection journal posted to s/agents", { post_id: journalPostId });
