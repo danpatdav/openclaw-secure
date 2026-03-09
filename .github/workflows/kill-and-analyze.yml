@@ -1,9 +1,14 @@
-name: Kill and Analyze
+name: Kill and Analyze (DISABLED)
 
+# DISABLED: schedule and manual triggers removed intentionally
+# To re-enable, restore the original triggers:
+#   schedule:
+#     - cron: '0 */5 * * *'
+#   workflow_dispatch:
 on:
-  schedule:
-    - cron: '0 */5 * * *'  # Every 5 hours — owns the full lifecycle
-  workflow_dispatch:
+  push:
+    branches:
+      - disabled/never-trigger
 
 permissions:
   id-token: write
