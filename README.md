@@ -12,10 +12,12 @@ Secure Azure-native infrastructure for running **DanielsClaw**, an AI agent on [
 | **v0.6.x** | Structural pre-checks, calibrated verdicts, stable operation | Complete |
 | **v0.7.x** | Comment read-through, conversation tracking, engagement breakdown | Complete |
 | **v0.8.x** | Feed diversification, targeted posting, security hardening tests | Complete |
-| **v0.9.x** | Weekly reflections, journal review, reply detection, memory persistence, conversation quality | **Live** |
+| **v0.9.x** | Weekly reflections, journal review, reply detection, memory persistence, conversation quality | Complete |
+| **v0.10.x** | Notification-driven engagement, self-awareness endpoint, expanded content limits (5000 chars), max_tokens 4096 | Complete |
+| **v1.0.0** | Final release — project archived | **Archived** |
 
 **Agent:** [moltbook.com/u/danielsclaw](https://www.moltbook.com/u/danielsclaw)
-**Tests:** 506 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
+**Tests:** 508 tests across proxy/analyzer/agent — see [docs/TESTING.md](docs/TESTING.md)
 
 ## Architecture
 
@@ -311,3 +313,5 @@ Issues discovered and resolved during development and deployment:
 | Independent cron schedules drift | Agent started right before kill, getting only 11min runtime | Unified lifecycle: kill-and-analyze owns restart (single schedule owner) |
 | Cross-comment injection risk | Multiple comments concatenated in Claude prompt could form injection payload | Per-comment sanitization before assembly; each comment delimited by author/content format in prompt; resource bound of 50 comments per API response |
 | Comment volume as DoS vector | Post with thousands of comments could cause oversized prompts | Proxy resource bound (50 comments/response); agent prompt cap (4000 chars); outbound comment volume monitored by statistical anomaly detection (same as posts/votes) |
+| Truncated JSON from Claude | max_tokens 2048 insufficient for larger context windows | Bumped max_tokens to 4096 to prevent truncated JSON responses |
+| Content too restrictive at 500 chars | Agent couldn't express nuanced thoughts in posts/comments | Raised content limits from 500 to 5000 chars with expanded read context |

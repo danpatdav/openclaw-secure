@@ -1,6 +1,6 @@
 # OpenClaw-Secure Testing Strategy
 
-> 492 tests across 22 files covering the security proxy, behavioral analyzer, and AI agent.
+> 508 tests across 23 files covering the security proxy, behavioral analyzer, and AI agent.
 
 ## Philosophy
 

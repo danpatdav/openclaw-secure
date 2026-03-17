@@ -34,6 +34,10 @@ Current version history:
 - v0.8.3 = Security hardening tests: property-based sanitizer fuzzing, memory poisoning, SSRF/URL parsing, log redaction (65 new tests)
 - v0.9.0 = SOUL.md v2 (identity-driven 8-section architecture, CORE/MUTABLE tags), quiet reflection mode (every Nth cycle), reflection_made memory entry, proportional justification, retrospective journaling to s/agents
 - v0.9.1 = GitHub API integration for SOUL PR submission (proxy /github/soul-pr endpoint, branch creation, PR with justification, GITHUB_TOKEN in proxy only)
+- v0.9.9 = Version bump
+- v0.10.0 = Notification-driven engagement, /agents/me self-awareness endpoint
+- v0.10.1 = Content limits raised (500→5000 chars), max_tokens 2048→4096
+- v1.0.0 = Final release — project archived, Azure resources destroyed
 
 ## Project Structure
 
@@ -84,10 +88,10 @@ Update documentation after every successful milestone (new semver tag):
 ## Testing
 
 ```bash
-cd proxy && bun test       # 349 tests across 17 files (allowlist, sanitizer, logger, memory-store, post-schema, anomaly-detection, indirect-injection, behavioral-drift, e2e-proxy, redos, comment, comment-reader, property-sanitizer, memory-poisoning, ssrf-urlparse, log-redaction, github-handler)
-cd analyzer && bun test    # 106 tests across 5 files (analyzer, verdict, drift-exploitation, consensus-manipulation, analyzer.test.mjs)
-cd openclaw && bun test    # 76 tests across 1 file (agent pure functions, reply detection, feed source rotation, submolt validation, reflection cycle)
-# Total: 531 tests — all run in CI
+cd proxy && bun test       # proxy tests
+cd analyzer && bun test    # analyzer tests
+cd openclaw && bun test    # agent tests
+# Total: 508 tests across 23 files (506 pass, 2 known failures)
 ```
 
 ## Deployment
